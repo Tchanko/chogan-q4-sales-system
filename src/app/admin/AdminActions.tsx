@@ -8,6 +8,7 @@ import {
   type RegistrationStatus,
 } from "@/lib/domain";
 import {
+  confirmBalanceAction,
   confirmPaymentAction,
   leadStatusAction,
   logoutAction,
@@ -29,13 +30,18 @@ export function RegistrationActions({
   id,
   reference,
   status,
+  depositLabel,
+  awaitingBalance,
 }: {
   id: string;
   reference: string;
   status: RegistrationStatus;
+  /** Session 2 : montant de la réservation qui confirme la place. */
+  depositLabel: string | null;
+  /** Session 2 : réservation confirmée, solde pas encore vérifié. */
+  awaitingBalance: boolean;
 }) {
   const [statusState, statusAction, statusPending] = useActionState(registrationStatusAction, initial);
-  const [payState, payAction, payPending] = useActionState(confirmPaymentAction, initial);
   const uid = useId();
   const canConfirm = status === "request_received" || status === "payment_pending";
 
@@ -63,53 +69,93 @@ export function RegistrationActions({
       <Feedback state={statusState} />
 
       {canConfirm && (
-        <details className="rounded-lg border border-line p-3">
-          <summary className="cursor-pointer text-sm font-bold">Confirmer le paiement…</summary>
-          <form action={payAction} className="mt-3 space-y-3">
-            <input type="hidden" name="id" value={id} />
-            <div>
-              <label htmlFor={`${uid}-ref`} className="text-xs font-semibold">
-                Référence de la transaction (jamais de numéro de carte ni d&apos;IBAN)
-              </label>
-              <input
-                id={`${uid}-ref`}
-                name="paymentReference"
-                defaultValue={payState.values?.paymentReference}
-                className="field-input min-h-9 py-1 text-sm"
-                maxLength={200}
-                required
-                aria-invalid={payState.fieldErrors?.paymentReference ? true : undefined}
-              />
-              {payState.fieldErrors?.paymentReference && (
-                <p className="field-error text-xs">{payState.fieldErrors.paymentReference}</p>
-              )}
-            </div>
-            <div>
-              <label htmlFor={`${uid}-note`} className="text-xs font-semibold">
-                Note interne (facultatif)
-              </label>
-              <textarea
-                id={`${uid}-note`}
-                name="note"
-                rows={2}
-                maxLength={1000}
-                defaultValue={payState.values?.note}
-                className="field-input py-1 text-sm"
-              />
-            </div>
-            <label className="flex items-start gap-2 text-xs">
-              <input type="checkbox" name="verified" className="mt-0.5 size-4 accent-ink" />
-              <span>J&apos;ai vérifié la réception effective du paiement ({reference}).</span>
-            </label>
-            {payState.fieldErrors?.verified && <p className="field-error text-xs">{payState.fieldErrors.verified}</p>}
-            <button type="submit" className="btn btn-dark min-h-9 w-full px-3 py-1 text-sm" disabled={payPending}>
-              Confirmer l&apos;inscription
-            </button>
-            <Feedback state={payState} />
-          </form>
-        </details>
+        <ManualProofForm
+          id={id}
+          action={confirmPaymentAction}
+          summary={depositLabel ? `Confirmer la réservation (${depositLabel})…` : "Confirmer le paiement…"}
+          checkboxLabel={
+            depositLabel
+              ? `J'ai vérifié la réception effective de la réservation de ${depositLabel} (${reference}).`
+              : `J'ai vérifié la réception effective du paiement (${reference}).`
+          }
+          submitLabel={depositLabel ? "Confirmer la place" : "Confirmer l'inscription"}
+        />
+      )}
+      {awaitingBalance && (
+        <ManualProofForm
+          id={id}
+          action={confirmBalanceAction}
+          summary="Confirmer le solde…"
+          checkboxLabel={`J'ai vérifié la réception effective du solde (${reference}).`}
+          submitLabel="Confirmer le solde"
+        />
       )}
     </div>
+  );
+}
+
+/** Vérification manuelle d'un paiement : référence de transaction + case de vérification. */
+function ManualProofForm({
+  id,
+  action,
+  summary,
+  checkboxLabel,
+  submitLabel,
+}: {
+  id: string;
+  action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
+  summary: string;
+  checkboxLabel: string;
+  submitLabel: string;
+}) {
+  const [state, formAction, pending] = useActionState(action, initial);
+  const uid = useId();
+  return (
+    <details className="rounded-lg border border-line p-3">
+      <summary className="cursor-pointer text-sm font-bold">{summary}</summary>
+      <form action={formAction} className="mt-3 space-y-3">
+        <input type="hidden" name="id" value={id} />
+        <div>
+          <label htmlFor={`${uid}-ref`} className="text-xs font-semibold">
+            Référence de la transaction (jamais de numéro de carte ni d&apos;IBAN)
+          </label>
+          <input
+            id={`${uid}-ref`}
+            name="paymentReference"
+            defaultValue={state.values?.paymentReference}
+            className="field-input min-h-9 py-1 text-sm"
+            maxLength={200}
+            required
+            aria-invalid={state.fieldErrors?.paymentReference ? true : undefined}
+          />
+          {state.fieldErrors?.paymentReference && (
+            <p className="field-error text-xs">{state.fieldErrors.paymentReference}</p>
+          )}
+        </div>
+        <div>
+          <label htmlFor={`${uid}-note`} className="text-xs font-semibold">
+            Note interne (facultatif)
+          </label>
+          <textarea
+            id={`${uid}-note`}
+            name="note"
+            rows={2}
+            maxLength={1000}
+            defaultValue={state.values?.note}
+            className="field-input py-1 text-sm"
+          />
+        </div>
+        <label className="flex items-start gap-2 text-xs">
+          <input type="checkbox" name="verified" className="mt-0.5 size-4 accent-ink" />
+          <span>{checkboxLabel}</span>
+        </label>
+        {state.fieldErrors?.verified && <p className="field-error text-xs">{state.fieldErrors.verified}</p>}
+        <button type="submit" className="btn btn-dark min-h-9 w-full px-3 py-1 text-sm" disabled={pending}>
+          {submitLabel}
+        </button>
+        <Feedback state={state} />
+      </form>
+    </details>
   );
 }
 

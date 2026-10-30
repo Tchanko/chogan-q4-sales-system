@@ -10,7 +10,8 @@ import {
   guaranteeDeliverables,
   type GuaranteeDecisions,
 } from "@/content/guarantee";
-import { offer } from "@/content/offer";
+import { balanceCents, formatEuroCents, offer } from "@/content/offer";
+import { formatDeadline } from "@/lib/enrollment";
 
 export const metadata: Metadata = {
   title: "Conditions générales de vente",
@@ -19,10 +20,12 @@ export const metadata: Metadata = {
 };
 
 const practical = offer.sessions.practical;
+const [session1, session2] = offer.cohorts;
+const capacity = session1.capacity;
 
 export default function TermsPage() {
   return (
-    <LegalPage title="Conditions générales de vente" updated="29 octobre 2026">
+    <LegalPage title="Conditions générales de vente" updated="30 octobre 2026">
       <p>
         Version : {offer.legal.termsVersion}. Les présentes conditions s&apos;appliquent à la formation{" "}
         {offer.name} vendue par Tchanko Chirac (coordonnées complètes dans les{" "}
@@ -31,12 +34,25 @@ export default function TermsPage() {
 
       <h2>1. Objet et contenu de la formation</h2>
       <p>
-        La formation se déroule du {offer.cohort.startLabel} au {offer.cohort.endLabel}, à raison de{" "}
-        {offer.cohort.rhythm}, en format {offer.cohort.format}. Le programme détaillé figure sur la{" "}
-        <Link href="/formation">page de présentation</Link>.
+        La formation est proposée en deux sessions (promotions) de {capacity} participants maximum chacune, à
+        raison de {offer.schedule.rhythm}, en format {offer.schedule.format} :
+      </p>
+      <ul>
+        {offer.cohorts.map((c, i) => (
+          <li key={c.id}>
+            {c.name} : du {c.startLabel} au {c.endLabel}
+            {i < offer.cohorts.length - 1 ? " ;" : "."}
+          </li>
+        ))}
+      </ul>
+      <p>
+        Aucune autre session n&apos;est prévue. Le programme détaillé figure sur la{" "}
+        <Link href="/formation">page de présentation</Link>. Dans les présentes conditions, le mot
+        « session » employé seul désigne une séance de formation en direct ; « {session1.name} » et
+        « {session2.name} » désignent les deux promotions.
       </p>
       <p>
-        Modalités pratiques : formation {practical.mode}, via {practical.tool} ; sessions {practical.days},
+        Modalités pratiques, identiques pour les deux sessions : formation {practical.mode}, via {practical.tool} ; sessions {practical.days},
         d&apos;une durée de {practical.duration} chacune.
         {practical.replays && " Les sessions sont enregistrées et leurs replays sont mis à disposition des participants."}{" "}
         Les sessions commencent à {practical.startTimes}.
@@ -49,24 +65,74 @@ export default function TermsPage() {
         {offer.price.vatNote}
       </p>
       <p>
+        Pour la {session2.name}, l&apos;inscription se fait par une réservation de place de{" "}
+        {session2.deposit.label}, déduite du prix : le solde restant à payer est de{" "}
+        {formatEuroCents(balanceCents(session2) ?? 0)}. Date limite de paiement du solde :{" "}
+        <Todo>date limite de paiement du solde de la Session 2</Todo>.
+      </p>
+      <p>
         Un budget publicitaire de {offer.adBudget.label} par participant est demandé pour la partie Facebook
         Ads. Ce budget reste à la charge du participant, de même que les outils utilisés pendant la formation.
       </p>
 
-      <h2>3. Processus d&apos;inscription</h2>
+      <h2 id="inscription">3. Places et processus d&apos;inscription</h2>
+      <h3>3.1 Places</h3>
+      <p>
+        Chaque session compte {capacity} places. Une place est attribuée uniquement à une inscription
+        confirmée, c&apos;est-à-dire après vérification effective du paiement (pour la {session2.name} : de la
+        réservation de place). Une demande d&apos;inscription ne réserve pas de place. Le nombre de places
+        restantes affiché sur le site est calculé à partir des inscriptions confirmées.
+      </p>
+      <h3>3.2 Processus</h3>
       <ol className="list-decimal pl-5">
         <li>Le participant envoie une demande d&apos;inscription en ligne et reçoit une référence.</li>
         <li>Les instructions de paiement lui sont transmises sur WhatsApp.</li>
         <li>
-          L&apos;inscription est confirmée uniquement après vérification effective de la réception du paiement.
+          L&apos;inscription est confirmée uniquement après vérification effective de la réception du paiement
+          (pour la {session2.name} : de la réservation de place).
         </li>
       </ol>
+      <h3>3.3 Clôture des inscriptions</h3>
+      <p>
+        Les inscriptions à une session ferment dès que ses {capacity} places sont confirmées et, au plus
+        tard, 3 jours après son démarrage, à 23 h 59 (heure de Paris) : le{" "}
+        {formatDeadline(session1.enrollmentDeadlineIso)} pour la {session1.name}, le{" "}
+        {formatDeadline(session2.enrollmentDeadlineIso)} pour la {session2.name}. Les inscriptions à la{" "}
+        {session2.name} ouvrent lorsque celles de la {session1.name} sont fermées ; il n&apos;est alors plus
+        possible de s&apos;inscrire à la {session1.name}.
+      </p>
+      <p>
+        Si une session devient complète avant la vérification du paiement d&apos;une demande, cette demande ne
+        peut pas être confirmée : le participant en est informé et peut s&apos;inscrire à la session suivante
+        si elle est ouverte. Toute somme déjà versée pour cette demande lui est intégralement remboursée.
+      </p>
+      <h3>3.4 Inscription après le démarrage d&apos;une session</h3>
+      <p>Lorsqu&apos;une inscription est confirmée après le démarrage de la session, dans le délai prévu à l&apos;article 3.3 :</p>
+      <ul>
+        <li>
+          les sessions tenues avant la date de confirmation de l&apos;inscription ne sont pas décomptées comme
+          des absences ;
+        </li>
+        <li>les replays de ces sessions sont fournis au participant ;</li>
+        <li>
+          pour la garantie, le relevé de départ prévu à l&apos;article 7.7.3 est effectué à la date de
+          confirmation de l&apos;inscription.
+        </li>
+      </ul>
 
       <h2>4. Paiement</h2>
       <p>
         Moyens de paiement acceptés : {offer.paymentMethods.map((m) => m.label).join(", ")}. Aucun frais
         supplémentaire n&apos;est appliqué selon le moyen de paiement choisi. Aucune donnée bancaire n&apos;est
         collectée sur ce site.
+      </p>
+      <p id="reservation">
+        Réservation de place ({session2.name} uniquement) : la réservation de {session2.deposit.label} est
+        déduite du prix de la formation. Elle n&apos;est pas remboursable si le participant décide de ne pas
+        débuter la formation. Elle est remboursable si le participant suit la formation jusqu&apos;au bout :
+        elle est alors comprise dans le remboursement intégral prévu par la garantie (article 7), dans les
+        mêmes conditions que le reste du prix. Ces règles s&apos;appliquent sans préjudice du droit de
+        rétractation (article 5) et de l&apos;annulation de la formation par l&apos;organisateur (article 6).
       </p>
 
       <h2>5. Droit de rétractation</h2>
@@ -111,7 +177,8 @@ export default function TermsPage() {
       <ul>
         <li>
           une période de mise en pratique de {PRACTICE_DAYS} jours, correspondant à la formation en direct
-          avec partage d&apos;écran (du {offer.cohort.startLabel} au {offer.cohort.endLabel}) ;
+          avec partage d&apos;écran (
+          {offer.cohorts.map((c) => `du ${c.startLabel} au ${c.endLabel} pour la ${c.name}`).join(", ")}) ;
         </li>
         <li>
           si, au terme de cette période, le participant qui a respecté les articles 7.2 à 7.5 n&apos;a obtenu

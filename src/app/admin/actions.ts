@@ -1,16 +1,23 @@
 "use server";
 
-import { refresh } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAdminConfig } from "@/lib/config/server-env";
 import { LEAD_STATUS_LABELS, REGISTRATION_STATUSES, type LeadStatus, type RegistrationStatus } from "@/lib/domain";
+import { ENROLLMENT_CACHE_TAG } from "@/lib/enrollment-server";
 import { sharedLimiter } from "@/lib/http/api";
 import { RATE_LIMITS, checkRateLimit } from "@/lib/security/rate-limit";
 import { clientIpFromHeaders } from "@/lib/security/request";
 import { fingerprint, safeEqual } from "@/lib/security/signing";
 import { USER_MESSAGES } from "@/lib/services/result";
-import { changeRegistrationStatus, confirmManualPayment } from "@/lib/services/registrations";
+import {
+  changeRegistrationStatus,
+  confirmBalancePayment,
+  confirmManualPayment,
+  type ManualConfirmationInput,
+} from "@/lib/services/registrations";
+import type { ServiceResult } from "@/lib/services/result";
 import {
   ADMIN_COOKIE,
   ADMIN_COOKIE_PATH,
@@ -86,18 +93,30 @@ export async function registrationStatusAction(_prev: ActionState, formData: For
   if (!repo) return STORAGE_ERROR;
   const result = await changeRegistrationStatus(repo, id, status);
   if (!result.ok) return { ok: false, message: USER_MESSAGES[result.code] };
+  // Une inscription confirmée qui change de statut libère une place : compteur à jour.
+  updateTag(ENROLLMENT_CACHE_TAG);
   refresh();
   return { ok: true, message: "Statut mis à jour." };
 }
 
-export async function confirmPaymentAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+type ManualConfirmation = (
+  repo: NonNullable<ReturnType<typeof getRepository>>,
+  id: string,
+  input: ManualConfirmationInput,
+) => Promise<ServiceResult<null>>;
+
+async function runManualConfirmation(
+  formData: FormData,
+  confirm: ManualConfirmation,
+  successMessage: string,
+): Promise<ActionState> {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   const repo = getRepository();
   if (!repo) return STORAGE_ERROR;
   const paymentReference = String(formData.get("paymentReference") ?? "");
   const note = String(formData.get("note") ?? "");
-  const result = await confirmManualPayment(repo, id, {
+  const result = await confirm(repo, id, {
     paymentReference,
     note,
     verified: formData.get("verified") === "on",
@@ -111,8 +130,21 @@ export async function confirmPaymentAction(_prev: ActionState, formData: FormDat
       values: { paymentReference: result.fieldErrors?.paymentReference ? "" : paymentReference, note },
     };
   }
+  updateTag(ENROLLMENT_CACHE_TAG);
   refresh();
-  return { ok: true, message: "Paiement confirmé : l'inscription est confirmée." };
+  return { ok: true, message: successMessage };
+}
+
+export async function confirmPaymentAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return runManualConfirmation(
+    formData,
+    confirmManualPayment,
+    "Paiement vérifié : la place est confirmée et le compteur est à jour.",
+  );
+}
+
+export async function confirmBalanceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return runManualConfirmation(formData, confirmBalancePayment, "Solde vérifié : l'inscription est complète.");
 }
 
 /* --------------------------------------------------------------------- */

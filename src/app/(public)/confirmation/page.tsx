@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { TrackPurchase } from "@/components/analytics/TrackPurchase";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { WhatsAppLink } from "@/components/ui/WhatsAppLink";
-import { offer, paymentMethodLabel } from "@/content/offer";
+import { findCohort, formatEuroCents, offer, paymentMethodLabel } from "@/content/offer";
 import type { RegistrationStatus } from "@/lib/domain";
 import { getRegistrationIdFromCookie } from "@/lib/session/registration-cookie";
 import { whatsappMessages, whatsappUrl } from "@/lib/site";
@@ -86,23 +86,36 @@ function StatusDetails({ registration }: { registration: RegistrationPublicView 
   const { status, reference } = registration;
   const states = stepStates(status);
   const waUrl = whatsappUrl(whatsappMessages.registration(reference));
-  const price = `${(registration.priceCents / 100).toLocaleString("fr-FR")} ${registration.currency === "EUR" ? "€" : registration.currency}`;
+  const cohort = findCohort(registration.cohort);
+  const deposit = registration.depositCents;
+  const balanceDue = deposit === null ? null : registration.priceCents - deposit;
+  const awaitingBalance = status === "confirmed" && deposit !== null && registration.balanceVerifiedAt === null;
+  const amount =
+    registration.currency === "EUR"
+      ? formatEuroCents(registration.priceCents)
+      : `${registration.priceCents / 100} ${registration.currency}`;
+  const title = awaitingBalance ? "Place réservée" : TITLES[status];
 
   const steps = [
     {
       title: "Demande d'inscription reçue",
-      text: "Ta demande est enregistrée avec ta référence.",
+      text: "Ta demande est enregistrée avec ta référence. Elle ne réserve pas encore de place.",
     },
     {
-      title: "Paiement en attente de vérification",
+      title: deposit !== null ? "Réservation en attente de vérification" : "Paiement en attente de vérification",
       text:
         status === "payment_pending"
           ? "Ton paiement est en cours de vérification."
-          : "Tu reçois les instructions de paiement sur WhatsApp, puis ton paiement est vérifié.",
+          : deposit !== null
+            ? `Tu reçois sur WhatsApp les instructions pour régler ta réservation de ${formatEuroCents(deposit)}, puis ton paiement est vérifié.`
+            : "Tu reçois les instructions de paiement sur WhatsApp, puis ton paiement est vérifié.",
     },
     {
-      title: "Inscription confirmée",
-      text: "Uniquement après vérification effective de ton paiement.",
+      title: deposit !== null ? "Place réservée" : "Inscription confirmée",
+      text:
+        deposit !== null
+          ? `Uniquement après vérification effective de ta réservation. Le solde de ${formatEuroCents(balanceDue ?? 0)} se règle ensuite.`
+          : "Uniquement après vérification effective de ton paiement.",
     },
   ];
 
@@ -120,7 +133,7 @@ function StatusDetails({ registration }: { registration: RegistrationPublicView 
       <section className="rounded-3xl bg-paper p-6 sm:p-8" aria-labelledby="statut-titre">
         <p className="eyebrow text-cyan-ink">{offer.name}</p>
         <h1 id="statut-titre" className="mt-2 text-3xl font-extrabold sm:text-4xl">
-          {TITLES[status]}
+          {title}
         </h1>
 
         {status !== "confirmed" && status !== "cancelled" && (
@@ -131,8 +144,9 @@ function StatusDetails({ registration }: { registration: RegistrationPublicView 
         )}
         {status === "confirmed" && (
           <p className="mt-4 rounded-xl border-l-4 border-cyan bg-mist p-4 font-semibold">
-            Ton paiement a été vérifié : ta place pour la session du {offer.cohort.startLabel} est
-            confirmée. Les informations d&apos;accès te sont communiquées sur WhatsApp avant le démarrage.
+            {awaitingBalance
+              ? `Ta réservation de ${formatEuroCents(deposit ?? 0)} a été vérifiée : ta place pour la ${cohort?.name ?? "session"} (${cohort?.shortDates ?? ""}) est réservée. Le solde de ${formatEuroCents(balanceDue ?? 0)} reste à régler : les instructions te sont transmises sur WhatsApp.`
+              : `Ton paiement a été vérifié : ta place pour la ${cohort?.name ?? "session"} (${cohort?.shortDates ?? ""}) est confirmée. Les informations d'accès te sont communiquées sur WhatsApp avant le démarrage.`}
           </p>
         )}
         {status === "cancelled" && (
@@ -142,7 +156,7 @@ function StatusDetails({ registration }: { registration: RegistrationPublicView 
           </p>
         )}
 
-        <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+        <dl className="mt-6 grid gap-4 sm:grid-cols-2">
           <div className="rounded-xl bg-ink p-4 text-paper">
             <dt className="text-xs font-bold uppercase tracking-wider text-muted-dark">Ta référence</dt>
             <dd className="mt-1 font-display text-xl font-extrabold tracking-wider" data-testid="registration-reference">
@@ -150,8 +164,20 @@ function StatusDetails({ registration }: { registration: RegistrationPublicView 
             </dd>
           </div>
           <div className="rounded-xl border border-line p-4">
+            <dt className="text-xs font-bold uppercase tracking-wider text-muted">Session</dt>
+            <dd className="mt-1 font-semibold" data-testid="registration-cohort">
+              {cohort ? `${cohort.name} · ${cohort.shortDates}` : registration.cohort}
+            </dd>
+          </div>
+          <div className="rounded-xl border border-line p-4">
             <dt className="text-xs font-bold uppercase tracking-wider text-muted">Montant</dt>
-            <dd className="mt-1 text-xl font-bold">{price}</dd>
+            <dd className="mt-1 text-xl font-bold">{amount}</dd>
+            {deposit !== null && (
+              <dd className="text-sm text-muted">
+                dont réservation de {formatEuroCents(deposit)} · solde de {formatEuroCents(balanceDue ?? 0)}{" "}
+                {registration.balanceVerifiedAt ? "réglé" : "à régler"}
+              </dd>
+            )}
           </div>
           <div className="rounded-xl border border-line p-4">
             <dt className="text-xs font-bold uppercase tracking-wider text-muted">Moyen de paiement choisi</dt>

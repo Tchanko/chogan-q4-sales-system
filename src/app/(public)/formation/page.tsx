@@ -3,10 +3,11 @@ import { TrackOnView, TrackedCta } from "@/components/analytics/Tracking";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { CalendarMockup } from "@/components/sales/CalendarMockup";
 import { GuaranteeSection } from "@/components/sales/GuaranteeSection";
+import { SeatsCounter } from "@/components/sales/SeatsCounter";
 import { StickyCta } from "@/components/sales/StickyCta";
 import { CheckList } from "@/components/ui/CheckList";
-import { offer } from "@/content/offer";
-import { formatDeadline } from "@/lib/enrollment";
+import { balanceCents, formatEuroCents, offer } from "@/content/offer";
+import { focusCohort, type EnrollmentState } from "@/lib/enrollment";
 import { getEnrollmentStateForPage } from "@/lib/enrollment-server";
 import { openGraph } from "@/lib/seo";
 import { joinHref, site, whatsappMessages, whatsappUrl } from "@/lib/site";
@@ -17,7 +18,7 @@ const formatEuros = (amount: number) => `${amount.toLocaleString("fr-FR")} €`;
 
 export const metadata: Metadata = {
   title: "La formation : 30 jours pour structurer ton contenu et ta prospection",
-  description: `${offer.promise} Du ${offer.cohort.startLabel} au ${offer.cohort.endLabel}, 4 sessions par semaine, 100 % pratique.`,
+  description: `${offer.promise} Deux sessions de 10 participants maximum, dès le ${offer.cohorts[0].startLabel}. 4 sessions par semaine, 100 % pratique.`,
   alternates: { canonical: "/formation" },
   openGraph: openGraph({
     title: `${offer.name} — 30 jours de pratique pour les consultants Chogan`,
@@ -46,9 +47,32 @@ function SectionTitle({ id, eyebrow, title, intro, dark }: {
   );
 }
 
+/** Bandeau d'état des inscriptions (fermeture, ou passage à la Session 2). */
+function EnrollmentBanner({ enrollment }: { enrollment: EnrollmentState }) {
+  const { cohort } = focusCohort(enrollment);
+  const first = enrollment.cohorts[0];
+  let text: string | null = null;
+  if (enrollment.reason === "manually_closed") {
+    text = "Les inscriptions sont actuellement fermées. Inscris-toi à la démonstration gratuite pour être informé(e) de la suite.";
+  } else if (!enrollment.open) {
+    text = "Les inscriptions sont closes : les deux sessions sont complètes ou ont démarré. Inscris-toi à la démonstration gratuite pour être informé(e) de la suite.";
+  } else if (cohort.deposit && enrollment.cohortId !== first.id) {
+    const firstName = offer.cohorts[0].name;
+    text = `La ${firstName} est ${first.status === "full" ? "complète" : "close"}. Les inscriptions sont ouvertes pour la ${cohort.name}, du ${cohort.startLabel} au ${cohort.endLabel} : tu réserves ta place avec ${cohort.deposit.label}, déduits du prix.`;
+  }
+  if (!text) return null;
+  return (
+    <div role="status" className="bg-yellow text-ink" data-testid="enrollment-banner">
+      <p className="container-page py-3 text-center text-sm font-bold">{text}</p>
+    </div>
+  );
+}
+
 export default async function SalesPage() {
   const enrollment = await getEnrollmentStateForPage();
   const open = enrollment.open;
+  const { cohort, availability } = focusCohort(enrollment);
+  const balance = balanceCents(cohort);
   const ctaHref = open ? joinHref() : "/";
   const ctaLabel = open ? CTA_LABEL : "Recevoir la démonstration gratuite";
   const questionUrl = whatsappUrl(whatsappMessages.question);
@@ -69,16 +93,7 @@ export default async function SalesPage() {
       />
 
       <main id="contenu">
-        {!open && (
-          <div role="status" className="bg-yellow text-ink">
-            <p className="container-page py-3 text-center text-sm font-bold">
-              {enrollment.reason === "deadline_passed"
-                ? `Les inscriptions pour la session de novembre 2026 sont closes depuis le ${formatDeadline(enrollment.deadlineIso)}.`
-                : "Les inscriptions pour la session de novembre 2026 sont actuellement fermées."}{" "}
-              Inscris-toi à la démonstration gratuite pour être informé(e) de la suite.
-            </p>
-          </div>
-        )}
+        <EnrollmentBanner enrollment={enrollment} />
 
         {/* 1. Hero */}
         <section id="hero" className="relative overflow-hidden bg-ink text-paper" aria-labelledby="hero-titre">
@@ -86,7 +101,7 @@ export default async function SalesPage() {
             <div>
               <p className="inline-flex items-center gap-2 rounded-full border border-white/15 px-3 py-1 text-sm font-semibold text-muted-dark">
                 <span className="size-2 rounded-full bg-yellow" aria-hidden="true" />
-                Session du {offer.cohort.startLabel} au {offer.cohort.endLabel}
+                {cohort.name} : du {cohort.startLabel} au {cohort.endLabel}
               </p>
               <h1 id="hero-titre" className="mt-5 text-[2.1rem] font-extrabold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
                 30 jours pour construire ton système de contenu et de prospection
@@ -104,11 +119,12 @@ export default async function SalesPage() {
                   Voir le programme
                 </a>
               </div>
+              {open && <SeatsCounter availability={availability} tone="dark" className="mt-8" />}
               <dl className="mt-10 grid grid-cols-2 gap-4 border-t border-white/10 pt-6 sm:grid-cols-4">
                 {[
-                  ["Dates", "6 nov. → 6 déc. 2026"],
-                  ["Rythme", offer.cohort.rhythm],
-                  ["Format", offer.cohort.format],
+                  ["Dates", cohort.shortDates],
+                  ["Rythme", offer.schedule.rhythm],
+                  ["Format", offer.schedule.format],
                   ["Tarif", offer.price.label],
                 ].map(([k, v]) => (
                   <div key={k}>
@@ -279,14 +295,27 @@ export default async function SalesPage() {
               <SectionTitle
                 id="tarif-titre"
                 eyebrow="Tarif"
-                title="Ton inscription à la session de novembre 2026"
+                title={`Ton inscription à la ${cohort.name}`}
               />
               <ol className="mt-8 space-y-4">
-                {[
-                  ["Tu envoies ta demande d'inscription", "Un formulaire simple, sans paiement en ligne."],
-                  ["Tu reçois les instructions de paiement", "Sur WhatsApp, avec ta référence d'inscription."],
-                  ["Ton inscription est confirmée", "Uniquement après vérification effective de ton paiement."],
-                ].map(([title, text], i) => (
+                {(cohort.deposit
+                  ? [
+                      ["Tu envoies ta demande d'inscription", "Un formulaire simple, sans paiement en ligne."],
+                      [
+                        `Tu règles ta réservation de ${cohort.deposit.label}`,
+                        "Les instructions te sont envoyées sur WhatsApp, avec ta référence d'inscription.",
+                      ],
+                      [
+                        "Ta place est réservée",
+                        `Uniquement après vérification effective de ta réservation. Le solde de ${formatEuroCents(balance ?? 0)} se règle ensuite selon les conditions de vente.`,
+                      ],
+                    ]
+                  : [
+                      ["Tu envoies ta demande d'inscription", "Un formulaire simple, sans paiement en ligne."],
+                      ["Tu reçois les instructions de paiement", "Sur WhatsApp, avec ta référence d'inscription."],
+                      ["Ton inscription est confirmée", "Uniquement après vérification effective de ton paiement."],
+                    ]
+                ).map(([title, text], i) => (
                   <li key={title} className="flex gap-4">
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-bold text-paper">
                       {i + 1}
@@ -303,8 +332,15 @@ export default async function SalesPage() {
               <p className="text-sm font-bold uppercase tracking-wider text-muted-dark">{offer.name}</p>
               <p className="mt-3 font-display text-6xl font-extrabold">{offer.price.label}</p>
               <p className="mt-2 text-muted-dark">
-                Session du {offer.cohort.startLabel} au {offer.cohort.endLabel}
+                {cohort.name} : du {cohort.startLabel} au {cohort.endLabel}
               </p>
+              {cohort.deposit && (
+                <p className="mt-4 rounded-xl bg-white/10 p-4 text-sm" data-testid="deposit-info">
+                  Réservation de place : <strong className="text-paper">{cohort.deposit.label}</strong>, déduits
+                  du prix. Solde : <strong className="text-paper">{formatEuroCents(balance ?? 0)}</strong>.
+                </p>
+              )}
+              {open && <SeatsCounter availability={availability} tone="dark" className="mt-5" />}
               <CheckList
                 tone="dark"
                 className="mt-6 border-t border-white/10 pt-6"
@@ -367,8 +403,12 @@ export default async function SalesPage() {
               Prêt(e) à structurer ton contenu pour le Q4&nbsp;?
             </h2>
             <p className="mx-auto mt-5 max-w-xl text-lg text-muted-dark">
-              30 jours de pratique, du {offer.cohort.startLabel} au {offer.cohort.endLabel}.{" "}
-              {open ? "Envoie ta demande d'inscription : la confirmation se fait sur WhatsApp." : "Les inscriptions sont closes pour cette session."}
+              30 jours de pratique, du {cohort.startLabel} au {cohort.endLabel}.{" "}
+              {!open
+                ? "Les inscriptions sont closes."
+                : cohort.deposit
+                  ? `Réserve ta place avec ${cohort.deposit.label}, déduits du prix : la confirmation se fait sur WhatsApp.`
+                  : "Envoie ta demande d'inscription : la confirmation se fait sur WhatsApp."}
             </p>
             <TrackedCta href={ctaHref} location="final" className="btn btn-primary mt-8 text-base sm:text-lg">
               {ctaLabel}

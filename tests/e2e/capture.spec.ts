@@ -3,7 +3,7 @@ import path from "node:path";
 import { E2E_DATA_DIR, E2E_WHATSAPP } from "./env";
 import { expect, expectNoHorizontalScroll, test, waitHumanDelay } from "./fixtures";
 
-const SUBMIT = "Masterclass de lancement le 30 octobre 2026 à 20 h (heure de Paris)";
+const SUBMIT = "Masterclass de lancement le 1er novembre 2026 à 20 h (heure de Paris)";
 
 test.describe("Page de capture (/)", () => {
   test("affiche le titre, le sous-titre et la ressource gratuite", async ({ page }) => {
@@ -58,7 +58,7 @@ test.describe("Page de capture (/)", () => {
 
     await expect(page.getByRole("heading", { name: "C'est noté, Awa !" })).toBeVisible();
     await expect(page.getByTestId("lead-success")).toContainText(
-      "Ta place pour la masterclass de lancement du 30 octobre 2026 à 20 h (heure de Paris) est bien enregistrée.",
+      "Ta place pour la masterclass de lancement du 1er novembre 2026 à 20 h (heure de Paris) est bien enregistrée.",
     );
     const whatsapp = page.getByRole("link", { name: /Continuer sur WhatsApp/ });
     await expect(whatsapp).toHaveAttribute("href", new RegExp(`^https://wa\\.me/${E2E_WHATSAPP}\\?text=`));

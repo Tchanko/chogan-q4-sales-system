@@ -1,10 +1,12 @@
-import { paymentMethodLabel } from "@/content/offer";
+import { cohortLabel, paymentMethodLabel } from "@/content/offer";
 import { LEAD_STATUS_LABELS, REGISTRATION_STATUS_LABELS, acquisitionSource, challengeLabel } from "@/lib/domain";
 import { jsonError } from "@/lib/http/api";
 import { toCsv } from "@/lib/services/csv";
 import { isAdminAuthenticated } from "@/lib/session/admin";
 import { getRepository } from "@/lib/storage";
 import type { LeadRecord, RegistrationRecord } from "@/lib/storage/types";
+
+const cents = (value: number) => (value / 100).toFixed(2).replace(".", ",");
 
 /** Export CSV réservé à l'administration (?type=leads|registrations). */
 export async function GET(request: Request): Promise<Response> {
@@ -45,12 +47,17 @@ export async function GET(request: Request): Promise<Response> {
       { header: "WhatsApp", value: (r) => r.whatsapp },
       { header: "E-mail", value: (r) => r.email },
       { header: "Pays", value: (r) => r.country },
+      { header: "Session", value: (r) => cohortLabel(r.cohort) },
       { header: "Moyen de paiement", value: (r) => paymentMethodLabel(r.paymentMethod) },
-      { header: "Montant (€)", value: (r) => (r.priceCents / 100).toFixed(2).replace(".", ",") },
+      { header: "Montant (€)", value: (r) => cents(r.priceCents) },
+      { header: "Réservation (€)", value: (r) => (r.depositCents === null ? null : cents(r.depositCents)) },
       { header: "Statut", value: (r) => REGISTRATION_STATUS_LABELS[r.status] },
       { header: "Paiement vérifié le", value: (r) => r.paymentVerifiedAt },
       { header: "Vérification", value: (r) => r.paymentVerificationSource },
       { header: "Référence de paiement", value: (r) => r.paymentReference },
+      { header: "Solde vérifié le", value: (r) => r.balanceVerifiedAt },
+      { header: "Référence du solde", value: (r) => r.balanceReference },
+      { header: "Conditions de réservation acceptées", value: (r) => (r.depositCents === null ? null : r.consentDeposit ? "oui" : "non") },
       { header: "Offres acceptées", value: (r) => (r.consentMarketing ? "oui" : "non") },
       { header: "Source", value: (r) => acquisitionSource(r.attribution) },
       { header: "utm_campaign", value: (r) => r.attribution.utmCampaign },

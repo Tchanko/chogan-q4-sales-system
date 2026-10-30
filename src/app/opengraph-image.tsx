@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { offer } from "@/content/offer";
 
-export const alt = `${offer.name} — formation contenu et prospection pour consultants Chogan, du ${offer.cohort.startLabel} au ${offer.cohort.endLabel}`;
+export const alt = `${offer.name} — formation contenu et prospection pour consultants Chogan, dès le ${offer.cohorts[0].startLabel}`;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -48,7 +48,7 @@ export default function OpenGraphImage() {
           </div>
           <div style={{ display: "flex", gap: 16, fontSize: 28, color: "#A9B0B6" }}>
             <span style={{ color: "#FFD400" }}>●</span>
-            <span>{`Du ${offer.cohort.startLabel.replace(" 2026", "")} au ${offer.cohort.endLabel} · 4 sessions par semaine · 100 % pratique`}</span>
+            <span>{`Dès le ${offer.cohorts[0].startLabel} · 10 places par session · 100 % pratique`}</span>
           </div>
         </div>
       </div>

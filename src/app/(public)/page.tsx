@@ -86,7 +86,7 @@ export default function CapturePage() {
               </h2>
               <p className="mt-4 text-lg leading-relaxed text-muted">
                 Le mini-atelier est une introduction à <strong className="text-ink">{offer.name}</strong> :
-                30 jours de pratique, du {offer.cohort.startLabel} au {offer.cohort.endLabel}, pour construire
+                30 jours de pratique, à partir du {offer.cohorts[0].startLabel} (10 participants par session), pour construire
                 ton système de création de contenu et de prospection.
               </p>
             </div>

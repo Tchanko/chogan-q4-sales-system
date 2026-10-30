@@ -37,6 +37,9 @@ test.describe("Inscription, confirmation et vérification du paiement", () => {
     await page.goto("/inscription");
     await expect(page.getByRole("heading", { level: 1, name: "Demande d'inscription" })).toBeVisible();
     await expect(page.getByText("297 €").first()).toBeVisible();
+    // Places restantes de la Session 1, calculées sur les inscriptions confirmées.
+    const seats = page.getByTestId("seats-counter");
+    await expect(seats).toContainText(/places? restantes? sur 10/);
     await page.getByRole("button", { name: "Envoyer ma demande d'inscription" }).click();
     await expect(page.getByText("Tu dois accepter les conditions de vente.")).toBeVisible();
 
@@ -69,6 +72,11 @@ test.describe("Inscription, confirmation et vérification du paiement", () => {
     await admin.getByRole("button", { name: "Se connecter" }).click();
     await expect(admin.getByRole("heading", { name: "Tableau de bord" })).toBeVisible();
     await expectNoHorizontalScroll(admin);
+
+    // Places confirmées de la Session 1 avant cette confirmation (lecture en temps réel).
+    const cohortCard = admin.getByTestId("admin-cohort-2026-11");
+    const confirmedBefore = Number((await cohortCard.innerText()).match(/(\d+) \/ 10/)?.[1]);
+    expect(confirmedBefore).toBeLessThan(10);
 
     const row = admin.getByTestId(`registration-row-${reference}`);
     await expect(row).toContainText("Demande reçue");
@@ -103,6 +111,12 @@ test.describe("Inscription, confirmation et vérification du paiement", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Inscription confirmée");
     await expect(page.getByText(/n'est pas encore confirmée/)).toHaveCount(0);
+    await expect(page.getByTestId("registration-cohort")).toHaveText("Session 1 · 6 nov. → 6 déc. 2026");
+
+    // 7 bis. Le compteur de places tient compte de la confirmation, sans attendre.
+    await expect(cohortCard).toContainText(`${confirmedBefore + 1} / 10`);
+    await page.goto("/inscription");
+    await expect(page.getByTestId("seats-counter")).toHaveAttribute("data-remaining", String(10 - confirmedBefore - 1));
 
     // 8. Export CSV réservé à l'administration.
     const csv = await admin.request.get("/admin/export?type=registrations");

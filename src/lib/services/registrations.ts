@@ -1,9 +1,9 @@
 import { randomInt } from "node:crypto";
-import { offer } from "@/content/offer";
+import { findCohort, offer } from "@/content/offer";
 import { REGISTRATION_TRANSITIONS, type RegistrationStatus } from "@/lib/domain";
 import type { EnrollmentState } from "@/lib/enrollment";
 import { checkHumanSignals } from "@/lib/security/anti-bot";
-import { DuplicateReferenceError, type Repository } from "@/lib/storage/types";
+import { CohortFullError, DuplicateReferenceError, type Repository } from "@/lib/storage/types";
 import { normalizeWhatsApp } from "@/lib/validation/phone";
 import {
   normalizeAttribution,
@@ -37,20 +37,26 @@ export interface RegistrationSubmitted {
 }
 
 /**
- * Enregistre une demande d'inscription (statut « demande reçue »).
- * Aucun paiement n'est simulé ni considéré comme acquis.
+ * Enregistre une demande d'inscription (statut « demande reçue ») pour la
+ * session ouverte. Une demande ne réserve aucune place : seules les
+ * inscriptions confirmées comptent. Aucun paiement n'est simulé ni considéré
+ * comme acquis.
  */
 export async function submitRegistration(
   body: unknown,
   deps: RegistrationDeps,
 ): Promise<ServiceResult<RegistrationSubmitted>> {
-  if (!deps.enrollment.open) return failure("ENROLLMENT_CLOSED");
+  const cohort = deps.enrollment.open ? findCohort(deps.enrollment.cohortId) : undefined;
+  if (!cohort) return failure("ENROLLMENT_CLOSED");
 
   const meta = submissionMetaSchema.safeParse(body);
   if (!meta.success || checkHumanSignals(meta.data) !== "ok") return failure("BOT_SUSPECTED");
 
   const parsed = registrationFormSchema.safeParse(body);
   if (!parsed.success) return failure("VALIDATION", toFieldErrors(parsed.error));
+  // La session affichée au visiteur a fermé entre-temps (complète ou date limite) :
+  // il doit voir les conditions de la session suivante avant de s'y inscrire.
+  if (parsed.data.cohort !== cohort.id) return failure("COHORT_CHANGED");
 
   if (!deps.repo) return failure("STORAGE_UNAVAILABLE");
   if (!deps.canIssueConfirmationCookie) return failure("CONFIG_INCOMPLETE");
@@ -65,16 +71,18 @@ export async function submitRegistration(
     try {
       const { id } = await deps.repo.createRegistration({
         reference,
-        cohort: offer.cohort.id,
+        cohort: cohort.id,
         fullName: v.fullName,
         whatsapp,
         email: v.email || null,
         country: v.country.toUpperCase(),
         paymentMethod: v.paymentMethod,
         priceCents: offer.price.amountCents,
+        depositCents: cohort.deposit?.amountCents ?? null,
         currency: offer.price.currency,
         termsVersion: offer.legal.termsVersion,
         consentEarlyStart: v.consentEarlyStart === true,
+        consentDeposit: cohort.deposit !== null && v.consentDeposit === true,
         consentMarketing: v.consentMarketing === true,
         attribution: normalizeAttribution(meta.data.attribution),
       });
@@ -109,7 +117,13 @@ export async function changeRegistrationStatus(
   await repo.updateRegistration(id, {
     status: next,
     ...(leavingConfirmed
-      ? { paymentVerifiedAt: null, paymentVerificationSource: null, paymentProvider: null }
+      ? {
+          paymentVerifiedAt: null,
+          paymentVerificationSource: null,
+          paymentProvider: null,
+          balanceVerifiedAt: null,
+          balanceReference: null,
+        }
       : {}),
   });
   return success(null);
@@ -162,16 +176,12 @@ export interface ManualConfirmationInput {
   verified: boolean;
 }
 
-/**
- * Confirmation manuelle par l'administrateur, après vérification effective
- * de la réception du paiement (relevé bancaire, Mobile Money…).
- */
-export async function confirmManualPayment(
-  repo: Repository,
-  id: string,
-  input: ManualConfirmationInput,
-  now: Date = new Date(),
-): Promise<ServiceResult<null>> {
+/** Contrôle commun aux vérifications manuelles (paiement, réservation, solde). */
+function validateManualProof(input: ManualConfirmationInput): {
+  reference: string;
+  note: string;
+  errors: Record<string, string> | null;
+} {
   const reference = input.paymentReference.trim();
   const note = input.note?.trim() ?? "";
   const errors: Record<string, string> = {};
@@ -184,19 +194,75 @@ export async function confirmManualPayment(
   if (note.length > 1000) errors.note = "Note trop longue (1000 caractères maximum).";
   else if (note && looksLikeBankData(note))
     errors.note = "Ne saisis jamais de numéro de carte ni d'IBAN.";
-  if (Object.keys(errors).length > 0) return failure("VALIDATION", errors);
+  return { reference, note, errors: Object.keys(errors).length > 0 ? errors : null };
+}
+
+/**
+ * Confirmation manuelle par l'administrateur, après vérification effective
+ * de la réception du paiement (relevé bancaire, Mobile Money…). Pour la
+ * Session 2, il s'agit de la réservation de place : elle suffit à confirmer
+ * la place, le solde est vérifié ensuite (confirmBalancePayment).
+ * Refusée si la session a déjà toutes ses places confirmées.
+ */
+export async function confirmManualPayment(
+  repo: Repository,
+  id: string,
+  input: ManualConfirmationInput,
+  now: Date = new Date(),
+): Promise<ServiceResult<null>> {
+  const { reference, note, errors } = validateManualProof(input);
+  if (errors) return failure("VALIDATION", errors);
 
   const current = await repo.getRegistration(id);
   if (!current) return failure("NOT_FOUND");
   if (current.status === "cancelled" || current.status === "confirmed")
     return failure("INVALID_TRANSITION");
 
+  const cohort = findCohort(current.cohort);
+  if (cohort) {
+    const confirmed = (await repo.countConfirmedByCohort())[cohort.id] ?? 0;
+    if (confirmed >= cohort.capacity) return failure("SESSION_FULL");
+  }
+
+  try {
+    await repo.updateRegistration(id, {
+      status: "confirmed",
+      paymentVerifiedAt: now.toISOString(),
+      paymentVerificationSource: "manual",
+      paymentProvider: null,
+      paymentReference: reference,
+      ...(note ? { adminNote: note } : {}),
+    });
+  } catch (error) {
+    // Deux confirmations simultanées pour la dernière place : le stockage tranche.
+    if (error instanceof CohortFullError) return failure("SESSION_FULL");
+    throw error;
+  }
+  return success(null);
+}
+
+/**
+ * Session 2 : vérification manuelle du paiement du solde, une fois la
+ * réservation confirmée.
+ */
+export async function confirmBalancePayment(
+  repo: Repository,
+  id: string,
+  input: ManualConfirmationInput,
+  now: Date = new Date(),
+): Promise<ServiceResult<null>> {
+  const { reference, note, errors } = validateManualProof(input);
+  if (errors) return failure("VALIDATION", errors);
+
+  const current = await repo.getRegistration(id);
+  if (!current) return failure("NOT_FOUND");
+  if (current.status !== "confirmed" || current.depositCents === null || current.balanceVerifiedAt)
+    return failure("INVALID_TRANSITION");
+
   await repo.updateRegistration(id, {
     status: "confirmed",
-    paymentVerifiedAt: now.toISOString(),
-    paymentVerificationSource: "manual",
-    paymentProvider: null,
-    paymentReference: reference,
+    balanceVerifiedAt: now.toISOString(),
+    balanceReference: reference,
     ...(note ? { adminNote: note } : {}),
   });
   return success(null);

@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<Response> {
     const secret = getAppSecret();
     const result = await submitRegistration(body, {
       repo,
-      enrollment: getEnrollmentStateNow(),
+      enrollment: await getEnrollmentStateNow(),
       canIssueConfirmationCookie: secret !== null,
     });
     if (!result.ok) return serviceErrorResponse(result);

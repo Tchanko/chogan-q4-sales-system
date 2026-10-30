@@ -9,7 +9,8 @@
 - [ ] Test : avec la clé **publique** (anon), une requête `select` sur `leads` est refusée.
 - [ ] (auto) `APP_SECRET` (48+ caractères) et `ADMIN_PASSWORD` (16+) propres à la production.
 - [ ] (auto) `NEXT_PUBLIC_SITE_URL` en https, `NEXT_PUBLIC_WHATSAPP_NUMBER` renseigné.
-- [ ] (auto) Date limite d'inscription correcte, `ENROLLMENT_OPEN` à `true`.
+- [ ] (auto) Dates limites d'inscription correctes (Session 1 : 09/11, Session 2 : 11/12), `ENROLLMENT_OPEN` à `true`.
+- [ ] Migration `20261030000000_sessions.sql` exécutée dans Supabase (après `..._init.sql`).
 - [ ] Variables saisies dans l'hébergeur **avant** le build (les `NEXT_PUBLIC_*` sont figées au build).
 - [ ] Domaine en HTTPS, redirection http → https active.
 
@@ -73,12 +74,19 @@
 - [ ] Aperçu de partage (Facebook Sharing Debugger / WhatsApp) avec l'image Open Graph.
 - [ ] PageSpeed Insights mobile sur `/` et `/formation` (objectif : performance ≥ 90).
 
-**Fermeture des inscriptions**
-- [ ] Sur un environnement de test : `ENROLLMENT_OPEN=false` → bandeau « inscriptions closes »,
+**Fermeture des inscriptions et compteur de places**
+- [ ] Sur un environnement de test : `ENROLLMENT_OPEN=false` → bandeau « inscriptions fermées »,
       CTA vers la démonstration gratuite, envoi de demande refusé.
+- [ ] Après une confirmation dans `/admin`, le compteur de `/formation` et `/inscription` baisse d'une
+      place ; une annulation le fait remonter.
+- [ ] Sur un environnement de test : `ENROLLMENT_DEADLINE` dans le passé → bandeau « Session 1 close »,
+      inscription à la Session 2 avec la case de réservation de 50 €, page de suivi « Place réservée »
+      après confirmation, puis « Confirmer le solde… » dans `/admin`.
 
 ## D. Après le lancement
 
 - [ ] Sauvegardes Supabase activées (plan adapté) ; export CSV hebdomadaire.
 - [ ] Suivi quotidien de `/admin` : demandes en attente à traiter sous 24 h.
-- [ ] Avant le 05/11 23 h 59 (veille du démarrage) : décider de prolonger ou non (`ENROLLMENT_DEADLINE`).
+- [ ] Ne pas envoyer d'instructions de paiement pour une session déjà complète (10 confirmées).
+- [ ] Session 1 : fermeture automatique à 10 confirmées ou le 09/11 à 23 h 59 ; Session 2 : le 11/12.
+- [ ] Après la masterclass du 1er novembre : mettre à jour `offer.leadMagnet.masterclass` (bouton de la page d'accueil).

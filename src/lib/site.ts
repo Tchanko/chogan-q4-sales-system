@@ -51,7 +51,7 @@ export function whatsappUrl(message: string): string | null {
 export const whatsappMessages = {
   leadMagnet: `Bonjour, je souhaite recevoir le mini-atelier gratuit « ${offer.leadMagnet.title.replace("Mini-atelier : ", "")} ».`,
   question: `Bonjour, j'ai une question sur la formation ${offer.name}.`,
-  join: `Bonjour, je souhaite rejoindre la formation ${offer.name} (session du ${offer.cohort.startLabel}).`,
+  join: `Bonjour, je souhaite rejoindre la formation ${offer.name}.`,
   registration: (reference: string) =>
     `Bonjour, je viens d'envoyer ma demande d'inscription à ${offer.name}. Ma référence : ${reference}.`,
 };

@@ -1,3 +1,4 @@
+import { computeEnrollmentState } from "@/lib/enrollment";
 import { JsonRepository, memoryPersistence } from "@/lib/storage/json-repository";
 
 export function memoryRepo() {
@@ -25,6 +26,7 @@ export const validRegistration = {
   phone: "06 12 34 56 78",
   country: "FR",
   paymentMethod: "virement",
+  cohort: "2026-11",
   consentTerms: true,
   consentEarlyStart: true,
   consentMarketing: false,
@@ -32,8 +34,17 @@ export const validRegistration = {
   attribution: { utmSource: "instagram" },
 };
 
-export const openEnrollment = {
-  open: true,
-  reason: "open" as const,
-  deadlineIso: "2026-11-05T22:59:59.000Z",
+/** Session 2 : réservation de place et conditions acceptées. */
+export const validSession2Registration = {
+  ...validRegistration,
+  cohort: "2026-12",
+  consentDeposit: true,
 };
+
+const config = { manuallyOpen: true, deadlineIso: null };
+
+/** Session 1 ouverte, aucune inscription confirmée. */
+export const openEnrollment = computeEnrollmentState(new Date("2026-10-30T12:00:00Z"), config, {});
+
+/** Session 1 close (date limite dépassée), Session 2 ouverte. */
+export const session2Enrollment = computeEnrollmentState(new Date("2026-11-10T12:00:00Z"), config, {});

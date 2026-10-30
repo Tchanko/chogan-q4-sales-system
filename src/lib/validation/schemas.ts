@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 import { CHALLENGE_IDS, type Attribution } from "@/lib/domain";
-import { PAYMENT_METHOD_IDS, offer } from "@/content/offer";
+import { COHORT_IDS, PAYMENT_METHOD_IDS, findCohort, offer } from "@/content/offer";
 import { isKnownCountry, normalizeWhatsApp } from "./phone";
 
 const NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
@@ -96,18 +96,31 @@ const registrationShape = {
     .trim()
     .refine(isKnownCountry, { error: "Choisis ton pays de résidence." }),
   paymentMethod: z.enum(PAYMENT_METHOD_IDS, { error: "Choisis un moyen de paiement." }),
+  /** Session affichée au moment de la demande (vérifiée côté serveur). */
+  cohort: z.enum(COHORT_IDS, { error: "Session inconnue : recharge la page." }),
   consentTerms: z.literal(true, { error: "Tu dois accepter les conditions de vente." }),
   consentEarlyStart: offer.legal.requireEarlyStartConsent
     ? z.literal(true, {
-        error: `Cette confirmation est nécessaire pour démarrer le ${offer.cohort.startLabel}.`,
+        error: "Cette confirmation est nécessaire pour démarrer la formation à la date prévue.",
       })
     : z.boolean(),
+  consentDeposit: z.boolean().default(false),
   consentMarketing: z.boolean().default(false),
 };
 
 export const registrationFormSchema = z
   .object(registrationShape)
-  .superRefine((v, ctx) => checkPhone(v, ctx), always);
+  .superRefine((v, ctx) => {
+    checkPhone(v, ctx);
+    // Session 2 : les conditions de la réservation de place doivent être acceptées.
+    if (findCohort(v.cohort)?.deposit && v.consentDeposit !== true) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["consentDeposit"],
+        message: "Coche cette case pour réserver ta place.",
+      });
+    }
+  }, always);
 
 export type RegistrationFormValues = z.input<typeof registrationFormSchema>;
 

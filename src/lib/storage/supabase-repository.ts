@@ -8,6 +8,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  CohortFullError,
   DuplicateReferenceError,
   type LeadRecord,
   type NewLead,
@@ -29,6 +30,7 @@ type Row = Record<string, unknown>;
 
 const str = (v: unknown): string => String(v ?? "");
 const strOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
+const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 
 function attributionFromRow(row: Row) {
   return {
@@ -85,9 +87,11 @@ function registrationFromRow(row: Row): RegistrationRecord {
     country: str(row.country),
     paymentMethod: str(row.payment_method),
     priceCents: Number(row.price_cents),
+    depositCents: numOrNull(row.deposit_cents),
     currency: str(row.currency),
     termsVersion: str(row.terms_version),
     consentEarlyStart: Boolean(row.consent_early_start),
+    consentDeposit: Boolean(row.consent_deposit),
     consentMarketing: Boolean(row.consent_marketing),
     status: str(row.status) as RegistrationStatus,
     paymentVerifiedAt: strOrNull(row.payment_verified_at),
@@ -96,6 +100,8 @@ function registrationFromRow(row: Row): RegistrationRecord {
     ) as PaymentVerificationSource | null,
     paymentProvider: strOrNull(row.payment_provider),
     paymentReference: strOrNull(row.payment_reference),
+    balanceVerifiedAt: strOrNull(row.balance_verified_at),
+    balanceReference: strOrNull(row.balance_reference),
     adminNote: strOrNull(row.admin_note),
     attribution: attributionFromRow(row),
   };
@@ -152,9 +158,11 @@ export class SupabaseRepository implements Repository {
         country: r.country,
         payment_method: r.paymentMethod,
         price_cents: r.priceCents,
+        deposit_cents: r.depositCents,
         currency: r.currency,
         terms_version: r.termsVersion,
         consent_early_start: r.consentEarlyStart,
+        consent_deposit: r.consentDeposit,
         consent_marketing: r.consentMarketing,
         ...attributionToRow(r.attribution),
       })
@@ -172,7 +180,7 @@ export class SupabaseRepository implements Repository {
     const { data, error } = await this.client
       .from("registrations")
       .select(
-        "id, reference, status, payment_method, price_cents, currency, created_at, payment_verification_source",
+        "id, reference, status, cohort, payment_method, price_cents, deposit_cents, currency, created_at, payment_verification_source, balance_verified_at",
       )
       .eq("id", id)
       .maybeSingle();
@@ -183,13 +191,16 @@ export class SupabaseRepository implements Repository {
       id: str(row.id),
       reference: str(row.reference),
       status: str(row.status) as RegistrationStatus,
+      cohort: str(row.cohort),
       paymentMethod: str(row.payment_method),
       priceCents: Number(row.price_cents),
+      depositCents: numOrNull(row.deposit_cents),
       currency: str(row.currency),
       createdAt: str(row.created_at),
       paymentVerificationSource: strOrNull(
         row.payment_verification_source,
       ) as PaymentVerificationSource | null,
+      balanceVerifiedAt: strOrNull(row.balance_verified_at),
     };
   }
 
@@ -220,9 +231,29 @@ export class SupabaseRepository implements Repository {
       row.payment_verification_source = patch.paymentVerificationSource;
     if (patch.paymentProvider !== undefined) row.payment_provider = patch.paymentProvider;
     if (patch.paymentReference !== undefined) row.payment_reference = patch.paymentReference;
+    if (patch.balanceVerifiedAt !== undefined) row.balance_verified_at = patch.balanceVerifiedAt;
+    if (patch.balanceReference !== undefined) row.balance_reference = patch.balanceReference;
     if (patch.adminNote !== undefined) row.admin_note = patch.adminNote;
     const { error } = await this.client.from("registrations").update(row).eq("id", id);
-    if (error) fail("update_registration", error);
+    if (error) {
+      // Levée par le déclencheur enforce_cohort_capacity (voir supabase/migrations).
+      if (error.message?.includes("cohort_full")) throw new CohortFullError();
+      fail("update_registration", error);
+    }
+  }
+
+  async countConfirmedByCohort(): Promise<Record<string, number>> {
+    const { data, error } = await this.client
+      .from("registrations")
+      .select("cohort")
+      .eq("status", "confirmed");
+    if (error) fail("count_confirmed_by_cohort", error);
+    const counts: Record<string, number> = {};
+    for (const row of data as Row[]) {
+      const cohort = str(row.cohort);
+      counts[cohort] = (counts[cohort] ?? 0) + 1;
+    }
+    return counts;
   }
 
   async recordOptOut(contact: OptOutContact): Promise<void> {

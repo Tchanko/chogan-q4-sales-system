@@ -8,7 +8,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { findCohort } from "@/content/offer";
 import {
+  CohortFullError,
   DuplicateReferenceError,
   type LeadRecord,
   type NewLead,
@@ -168,6 +170,8 @@ export class JsonRepository implements Repository {
         paymentVerificationSource: null,
         paymentProvider: null,
         paymentReference: null,
+        balanceVerifiedAt: null,
+        balanceReference: null,
         adminNote: null,
       };
       data.registrations.push(record);
@@ -183,11 +187,14 @@ export class JsonRepository implements Repository {
         id: r.id,
         reference: r.reference,
         status: r.status,
+        cohort: r.cohort,
         paymentMethod: r.paymentMethod,
         priceCents: r.priceCents,
+        depositCents: r.depositCents ?? null,
         currency: r.currency,
         createdAt: r.createdAt,
         paymentVerificationSource: r.paymentVerificationSource,
+        balanceVerifiedAt: r.balanceVerifiedAt ?? null,
       };
     }, false);
   }
@@ -207,8 +214,26 @@ export class JsonRepository implements Repository {
     return this.run((data) => {
       const r = data.registrations.find((x) => x.id === id);
       if (!r) throw new Error("registration_not_found");
+      // Même garde-fou que le déclencheur SQL : jamais plus de places confirmées que la capacité.
+      const capacity = findCohort(r.cohort)?.capacity;
+      if (patch.status === "confirmed" && r.status !== "confirmed" && capacity !== undefined) {
+        const confirmed = data.registrations.filter(
+          (x) => x.cohort === r.cohort && x.status === "confirmed",
+        ).length;
+        if (confirmed >= capacity) throw new CohortFullError();
+      }
       Object.assign(r, stripUndefined(patch), { updatedAt: this.now() });
     }, true);
+  }
+
+  countConfirmedByCohort(): Promise<Record<string, number>> {
+    return this.run((data) => {
+      const counts: Record<string, number> = {};
+      for (const r of data.registrations) {
+        if (r.status === "confirmed") counts[r.cohort] = (counts[r.cohort] ?? 0) + 1;
+      }
+      return counts;
+    }, false);
   }
 
   recordOptOut(contact: OptOutContact): Promise<void> {

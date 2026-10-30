@@ -22,7 +22,7 @@ export interface FunnelStats {
     byStatus: Record<RegistrationStatus, number>;
   };
   confirmedPayments: number;
-  /** Chiffre d'affaires vérifié, en centimes. */
+  /** Montants vérifiés, en centimes (réservation seule tant que le solde n'est pas vérifié). */
   confirmedRevenueCents: number;
   conversion: {
     /** Part des prospects ayant envoyé une demande d'inscription. */
@@ -35,6 +35,11 @@ export interface FunnelStats {
 }
 
 const ratio = (num: number, den: number): number | null => (den > 0 ? num / den : null);
+
+/** Montant effectivement vérifié pour une inscription confirmée. */
+function verifiedAmountCents(r: RegistrationRecord): number {
+  return r.depositCents !== null && r.balanceVerifiedAt === null ? r.depositCents : r.priceCents;
+}
 
 export function computeFunnelStats(
   leads: LeadRecord[],
@@ -92,7 +97,7 @@ export function computeFunnelStats(
       byStatus,
     },
     confirmedPayments: confirmed.length,
-    confirmedRevenueCents: confirmed.reduce((sum, r) => sum + r.priceCents, 0),
+    confirmedRevenueCents: confirmed.reduce((sum, r) => sum + verifiedAmountCents(r), 0),
     conversion: {
       leadToRegistration: ratio(leadsWhoRegistered, leads.length),
       registrationToPayment: ratio(confirmed.length, active.length),

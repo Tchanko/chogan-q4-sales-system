@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { paymentMethodLabel } from "@/content/offer";
+import { findCohort, formatEuroCents, offer, paymentMethodLabel } from "@/content/offer";
 import {
   LEAD_STATUS_LABELS,
   REGISTRATION_STATUSES,
@@ -9,7 +9,7 @@ import {
   challengeLabel,
   type RegistrationStatus,
 } from "@/lib/domain";
-import { formatDeadline } from "@/lib/enrollment";
+import { formatDeadline, seatsLabel, type CohortStatus } from "@/lib/enrollment";
 import { getEnrollmentStateNow } from "@/lib/enrollment-server";
 import { computeFunnelStats } from "@/lib/services/stats";
 import { requireAdmin } from "@/lib/session/admin";
@@ -38,7 +38,14 @@ const dateFormat = new Intl.DateTimeFormat("fr-FR", {
 const pct = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
 
-const euros = (cents: number) => `${(cents / 100).toLocaleString("fr-FR")} €`;
+const euros = formatEuroCents;
+
+const COHORT_STATUS_LABELS: Record<CohortStatus, string> = {
+  open: "inscriptions ouvertes",
+  waiting: "ouvrira quand la session précédente sera fermée",
+  full: "complète",
+  deadline_passed: "inscriptions closes (date limite dépassée)",
+};
 
 const waLink = (e164: string) => `https://wa.me/${e164.replace(/\D/g, "")}`;
 
@@ -66,7 +73,7 @@ async function Dashboard() {
 
   const [leads, registrations] = await Promise.all([repo.listLeads(5000), repo.listRegistrations(5000)]);
   const stats = computeFunnelStats(leads, registrations, new Date());
-  const enrollment = getEnrollmentStateNow();
+  const enrollment = await getEnrollmentStateNow();
 
   const kpis = [
     { label: "Prospects collectés", value: String(stats.leads.total), hint: `+${stats.leads.last7Days} sur 7 jours` },
@@ -95,11 +102,11 @@ async function Dashboard() {
             <strong>{repo.driver === "supabase" ? "Supabase" : "fichier local (tests uniquement)"}</strong> ·
             Inscriptions :{" "}
             <strong>
-              {enrollment.open
-                ? `ouvertes jusqu'au ${formatDeadline(enrollment.deadlineIso)}`
+              {enrollment.open && enrollment.deadlineIso
+                ? `${findCohort(enrollment.cohortId)?.name} ouverte jusqu'au ${formatDeadline(enrollment.deadlineIso)}`
                 : enrollment.reason === "manually_closed"
                   ? "fermées manuellement"
-                  : "closes (date limite dépassée)"}
+                  : "closes (toutes les sessions sont complètes ou closes)"}
             </strong>
           </p>
         </div>
@@ -120,6 +127,42 @@ async function Dashboard() {
           ligne.
         </p>
       )}
+
+      <section aria-labelledby="sessions-admin-titre">
+        <h2 id="sessions-admin-titre" className="text-xl font-bold">
+          Places par session
+        </h2>
+        <ul className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {enrollment.cohorts.map((c) => {
+            const cohort = findCohort(c.id)!;
+            return (
+              <li key={c.id} className="rounded-2xl bg-paper p-5" data-testid={`admin-cohort-${c.id}`}>
+                <p className="font-bold">
+                  {cohort.name} · {cohort.shortDates}
+                </p>
+                <p className="mt-1 font-display text-3xl font-extrabold">
+                  {c.confirmed ?? "—"} / {c.capacity}
+                  <span className="ml-2 text-sm font-semibold text-muted">confirmées</span>
+                </p>
+                <p className="text-sm text-muted">
+                  {seatsLabel(c) ?? "Comptage indisponible"} · {COHORT_STATUS_LABELS[c.status]} · date limite :{" "}
+                  {formatDeadline(c.deadlineIso)}
+                </p>
+                {cohort.deposit && (
+                  <p className="mt-1 text-xs text-muted">
+                    Réservation de {cohort.deposit.label} (déduite de {offer.price.label}) : elle confirme la place ;
+                    le solde se vérifie ensuite.
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-2 text-xs text-muted">
+          Une demande ne réserve aucune place : n&apos;envoie les instructions de paiement que s&apos;il reste des
+          places, la confirmation est refusée au-delà de la capacité.
+        </p>
+      </section>
 
       <section aria-labelledby="kpi-titre">
         <h2 id="kpi-titre" className="sr-only">
@@ -200,12 +243,13 @@ async function Dashboard() {
           Demandes d&apos;inscription <span className="text-muted">({registrations.length})</span>
         </h2>
         <div className="relative mt-3 overflow-x-auto rounded-2xl bg-paper">
-          <table className="w-full min-w-[60rem] text-left text-sm">
+          <table className="w-full min-w-[66rem] text-left text-sm">
             <thead className="border-b border-line text-muted">
               <tr>
                 <th scope="col" className="p-3 font-semibold">Date</th>
                 <th scope="col" className="p-3 font-semibold">Référence</th>
                 <th scope="col" className="p-3 font-semibold">Participant</th>
+                <th scope="col" className="p-3 font-semibold">Session</th>
                 <th scope="col" className="p-3 font-semibold">Paiement</th>
                 <th scope="col" className="p-3 font-semibold">Statut</th>
                 <th scope="col" className="w-72 p-3 font-semibold">Actions</th>
@@ -214,10 +258,14 @@ async function Dashboard() {
             <tbody className="divide-y divide-line align-top">
               {registrations.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-4 text-muted">Aucune demande pour le moment.</td>
+                  <td colSpan={7} className="p-4 text-muted">Aucune demande pour le moment.</td>
                 </tr>
               )}
-              {registrations.slice(0, LIST_LIMIT).map((r) => (
+              {registrations.slice(0, LIST_LIMIT).map((r) => {
+                const cohort = findCohort(r.cohort);
+                const awaitingBalance =
+                  r.status === "confirmed" && r.depositCents !== null && r.balanceVerifiedAt === null;
+                return (
                 <tr key={r.id} data-testid={`registration-row-${r.reference}`}>
                   <td className="p-3 whitespace-nowrap">{dateFormat.format(new Date(r.createdAt))}</td>
                   <td className="p-3 font-mono font-bold">{r.reference}</td>
@@ -232,14 +280,29 @@ async function Dashboard() {
                     </p>
                   </td>
                   <td className="p-3">
+                    <p className="font-semibold">{cohort?.name ?? r.cohort}</p>
+                    {cohort && <p className="text-xs text-muted">{cohort.shortDates}</p>}
+                  </td>
+                  <td className="p-3">
                     <p>{paymentMethodLabel(r.paymentMethod)}</p>
-                    <p className="text-muted">{euros(r.priceCents)}</p>
+                    {r.depositCents !== null ? (
+                      <p className="text-muted">
+                        Réservation {euros(r.depositCents)} + solde {euros(r.priceCents - r.depositCents)}
+                      </p>
+                    ) : (
+                      <p className="text-muted">{euros(r.priceCents)}</p>
+                    )}
                     {r.paymentReference && (
                       <p className="text-xs text-muted">
-                        Réf. : {r.paymentReference}
+                        {r.depositCents !== null ? "Réservation, réf. : " : "Réf. : "}
+                        {r.paymentReference}
                         {r.paymentVerificationSource === "manual" ? " (vérif. manuelle)" : " (prestataire)"}
                       </p>
                     )}
+                    {r.balanceReference && (
+                      <p className="text-xs text-muted">Solde, réf. : {r.balanceReference}</p>
+                    )}
+                    {awaitingBalance && <p className="text-xs font-semibold">Solde à vérifier</p>}
                   </td>
                   <td className="p-3">
                     <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-bold ${STATUS_STYLE[r.status]}`}>
@@ -248,10 +311,17 @@ async function Dashboard() {
                     {r.consentMarketing && <p className="mt-1 text-xs text-muted">Accepte les offres</p>}
                   </td>
                   <td className="p-3">
-                    <RegistrationActions id={r.id} reference={r.reference} status={r.status} />
+                    <RegistrationActions
+                      id={r.id}
+                      reference={r.reference}
+                      status={r.status}
+                      depositLabel={r.depositCents !== null ? euros(r.depositCents) : null}
+                      awaitingBalance={awaitingBalance}
+                    />
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

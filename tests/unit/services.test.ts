@@ -4,13 +4,22 @@ import { submitLead } from "@/lib/services/leads";
 import { applyProviderPayment } from "@/lib/services/payments";
 import {
   changeRegistrationStatus,
+  confirmBalancePayment,
   confirmManualPayment,
   looksLikeBankData,
   submitRegistration,
 } from "@/lib/services/registrations";
 import { computeFunnelStats } from "@/lib/services/stats";
 import { submitUnsubscribe } from "@/lib/services/unsubscribe";
-import { humanMeta, memoryRepo, openEnrollment, validLead, validRegistration } from "./helpers";
+import {
+  humanMeta,
+  memoryRepo,
+  openEnrollment,
+  session2Enrollment,
+  validLead,
+  validRegistration,
+  validSession2Registration,
+} from "./helpers";
 
 const registrationDeps = (repo = memoryRepo()) => ({
   repo,
@@ -86,7 +95,9 @@ describe("demandes d'inscription", () => {
     const saved = await deps.repo.getRegistration(result.value.registrationId);
     expect(saved).toMatchObject({
       status: "request_received",
+      cohort: "2026-11",
       priceCents: 29700,
+      depositCents: null,
       currency: "EUR",
       whatsapp: "+33612345678",
       paymentVerifiedAt: null,
@@ -95,7 +106,10 @@ describe("demandes d'inscription", () => {
   });
 
   it("refuse quand les inscriptions sont closes", async () => {
-    const deps = { ...registrationDeps(), enrollment: { ...openEnrollment, open: false, reason: "deadline_passed" as const } };
+    const deps = {
+      ...registrationDeps(),
+      enrollment: { ...openEnrollment, open: false, reason: "closed" as const, cohortId: null, deadlineIso: null },
+    };
     expect(await submitRegistration(validRegistration, deps)).toEqual({
       ok: false,
       code: "ENROLLMENT_CLOSED",
@@ -112,6 +126,30 @@ describe("demandes d'inscription", () => {
       code: "CONFIG_INCOMPLETE",
     });
     expect(await deps.repo.listRegistrations(10)).toHaveLength(0);
+  });
+
+  it("refuse une demande pour une session qui vient de fermer, sans rien enregistrer", async () => {
+    const deps = { ...registrationDeps(), enrollment: session2Enrollment };
+    expect(await submitRegistration(validRegistration, deps)).toEqual({ ok: false, code: "COHORT_CHANGED" });
+    expect(await deps.repo.listRegistrations(10)).toHaveLength(0);
+  });
+
+  it("Session 2 : enregistre la réservation de 50 € et exige l'accord sur ses conditions", async () => {
+    const deps = { ...registrationDeps(), enrollment: session2Enrollment };
+    const refused = await submitRegistration({ ...validSession2Registration, consentDeposit: false }, deps);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.fieldErrors?.consentDeposit).toBeTruthy();
+
+    const result = await submitRegistration(validSession2Registration, deps);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(await deps.repo.getRegistration(result.value.registrationId)).toMatchObject({
+      cohort: "2026-12",
+      priceCents: 29700,
+      depositCents: 5000,
+      consentDeposit: true,
+      status: "request_received",
+    });
   });
 
   it("régénère la référence en cas de collision", async () => {
@@ -184,6 +222,83 @@ describe("statuts et vérification des paiements", () => {
       status: "cancelled",
       paymentVerifiedAt: null,
       paymentVerificationSource: null,
+    });
+  });
+
+  async function fillSession1(count: number) {
+    const repo = memoryRepo();
+    const deps = registrationDeps(repo);
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const r = await submitRegistration(validRegistration, deps);
+      if (!r.ok) throw new Error("setup");
+      ids.push(r.value.registrationId);
+    }
+    return { repo, ids };
+  }
+
+  it("refuse de confirmer au-delà des 10 places d'une session", async () => {
+    const { repo, ids } = await fillSession1(11);
+    for (const [i, id] of ids.slice(0, 10).entries()) {
+      expect((await confirmManualPayment(repo, id, { paymentReference: `REF-${i}`, verified: true })).ok).toBe(true);
+    }
+    expect(await repo.countConfirmedByCohort()).toEqual({ "2026-11": 10 });
+    expect(await confirmManualPayment(repo, ids[10], { paymentReference: "REF-11", verified: true })).toEqual({
+      ok: false,
+      code: "SESSION_FULL",
+    });
+    expect((await repo.getRegistration(ids[10]))?.status).toBe("request_received");
+
+    // Une annulation libère la place.
+    expect((await changeRegistrationStatus(repo, ids[0], "cancelled")).ok).toBe(true);
+    expect((await confirmManualPayment(repo, ids[10], { paymentReference: "REF-11", verified: true })).ok).toBe(true);
+  });
+
+  it("le stockage refuse lui-même une 11e confirmation (confirmations simultanées)", async () => {
+    const { repo, ids } = await fillSession1(11);
+    const results = await Promise.all(
+      ids.map((id, i) => confirmManualPayment(repo, id, { paymentReference: `REF-${i}`, verified: true })),
+    );
+    expect(results.filter((r) => r.ok)).toHaveLength(10);
+    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, code: "SESSION_FULL" }]);
+    expect(await repo.countConfirmedByCohort()).toEqual({ "2026-11": 10 });
+  });
+
+  it("Session 2 : la réservation confirme la place, puis le solde est vérifié à part", async () => {
+    const repo = memoryRepo();
+    const r = await submitRegistration(validSession2Registration, {
+      ...registrationDeps(repo),
+      enrollment: session2Enrollment,
+    });
+    if (!r.ok) throw new Error("setup");
+    const id = r.value.registrationId;
+
+    // Pas de solde avant la réservation.
+    expect(await confirmBalancePayment(repo, id, { paymentReference: "SOLDE-1", verified: true })).toMatchObject({
+      code: "INVALID_TRANSITION",
+    });
+    expect((await confirmManualPayment(repo, id, { paymentReference: "RES-1", verified: true })).ok).toBe(true);
+    expect(await repo.countConfirmedByCohort()).toEqual({ "2026-12": 1 });
+    expect(computeFunnelStats([], await repo.listRegistrations(10)).confirmedRevenueCents).toBe(5000);
+
+    expect(
+      await confirmBalancePayment(repo, id, { paymentReference: "4111 1111 1111 1111", verified: true }),
+    ).toMatchObject({ code: "VALIDATION" });
+    expect((await confirmBalancePayment(repo, id, { paymentReference: "SOLDE-1", verified: true })).ok).toBe(true);
+    expect(await repo.getRegistration(id)).toMatchObject({ status: "confirmed", balanceReference: "SOLDE-1" });
+    expect((await repo.findRegistrationPublic(id))?.balanceVerifiedAt).toBeTruthy();
+    expect(computeFunnelStats([], await repo.listRegistrations(10)).confirmedRevenueCents).toBe(29700);
+
+    // Retour en attente : la vérification du solde est effacée.
+    expect((await changeRegistrationStatus(repo, id, "payment_pending")).ok).toBe(true);
+    expect(await repo.getRegistration(id)).toMatchObject({ balanceVerifiedAt: null, balanceReference: null });
+  });
+
+  it("refuse le solde pour une inscription sans réservation", async () => {
+    const { repo, id } = await newRegistration();
+    await confirmManualPayment(repo, id, { paymentReference: "REF-1", verified: true });
+    expect(await confirmBalancePayment(repo, id, { paymentReference: "SOLDE-1", verified: true })).toMatchObject({
+      code: "INVALID_TRANSITION",
     });
   });
 

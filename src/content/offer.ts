@@ -43,20 +43,48 @@ export const offer = {
   /** Budget publicitaire demandé à chaque participant (non inclus dans le prix). */
   adBudget: { label: "200 €" },
 
-  cohort: {
-    id: "2026-11",
-    startIso: "2026-11-06",
-    endIso: "2026-12-06",
-    startLabel: "6 novembre 2026",
-    endLabel: "6 décembre 2026",
+  /** Rythme et format, identiques pour les deux sessions. */
+  schedule: {
     rhythm: "4 sessions par semaine",
     format: "100 % pratique",
-    /**
-     * Date limite d'inscription par défaut : veille du démarrage, 23 h 59 (heure de Paris).
-     * Peut être remplacée par la variable ENROLLMENT_DEADLINE.
-     */
-    enrollmentDeadlineIso: "2026-11-05T23:59:59+01:00",
   },
+
+  /**
+   * Sessions (promotions) proposées — décisions du vendeur du 30/10/2026 :
+   * - 10 participants maximum par session, comptés sur les inscriptions confirmées
+   *   (paiement ou réservation effectivement vérifiés) ;
+   * - les inscriptions d'une session ferment dès 10 inscriptions confirmées, ou au plus
+   *   tard 3 jours après son démarrage, à 23 h 59 (heure de Paris) ;
+   * - la Session 2 n'ouvre qu'une fois la Session 1 fermée ; il n'y a pas de Session 3 ;
+   * - la Session 2 se réserve avec 50 € déduits du prix (conditions dans les CGV).
+   * Hypothèse à confirmer : fin de la Session 2 le 8 janvier 2027, mêmes jours et horaires.
+   * Si la capacité change, modifier aussi le déclencheur SQL de supabase/migrations.
+   */
+  cohorts: [
+    {
+      id: "2026-11",
+      name: "Session 1",
+      startLabel: "6 novembre 2026",
+      endLabel: "6 décembre 2026",
+      shortDates: "6 nov. → 6 déc. 2026",
+      capacity: 10,
+      /** Démarrage + 3 jours, 23 h 59 (heure de Paris). Remplaçable par ENROLLMENT_DEADLINE. */
+      enrollmentDeadlineIso: "2026-11-09T23:59:59+01:00",
+      deposit: null,
+    },
+    {
+      id: "2026-12",
+      name: "Session 2",
+      startLabel: "8 décembre 2026",
+      endLabel: "8 janvier 2027",
+      shortDates: "8 déc. 2026 → 8 janv. 2027",
+      capacity: 10,
+      /** Démarrage + 3 jours, 23 h 59 (heure de Paris). */
+      enrollmentDeadlineIso: "2026-12-11T23:59:59+01:00",
+      /** Réservation de place, déduite du prix (Session 2 uniquement). */
+      deposit: { amountCents: 5000, label: "50 €" },
+    },
+  ],
 
   audience:
     "Consultants et consultantes Chogan qui veulent développer leur activité grâce aux réseaux sociaux, mais qui manquent de temps, d'idées ou de compétences pour créer du contenu professionnel.",
@@ -166,7 +194,9 @@ export const offer = {
 
   sessions: {
     facts: [
-      "Du 6 novembre au 6 décembre 2026.",
+      "Session 1 : du 6 novembre au 6 décembre 2026.",
+      "Session 2 : du 8 décembre 2026 au 8 janvier 2027, dès que la Session 1 est complète ou close.",
+      "10 participants maximum par session.",
       "4 sessions par semaine.",
       "100 % pratique : chaque session aboutit à un livrable concret pour ton activité.",
     ],
@@ -214,11 +244,11 @@ export const offer = {
       "Rédiger le texte avec un assistant IA",
       "Transformer l'idée en visuel ou en script vidéo",
     ],
-    /** Session en direct où la démonstration est présentée (heure de Paris = UTC+1 le 30/10/2026). */
+    /** Session en direct où la démonstration est présentée (heure de Paris = UTC+1 le 01/11/2026). */
     masterclass: {
-      dateLabel: "30 octobre 2026 à 20 h (heure de Paris)",
-      startsAtIso: "2026-10-30T20:00:00+01:00",
-      ctaLabel: "Masterclass de lancement le 30 octobre 2026 à 20 h (heure de Paris)",
+      dateLabel: "1er novembre 2026 à 20 h (heure de Paris)",
+      startsAtIso: "2026-11-01T20:00:00+01:00",
+      ctaLabel: "Masterclass de lancement le 1er novembre 2026 à 20 h (heure de Paris)",
     },
   },
 
@@ -233,11 +263,23 @@ export const offer = {
     },
     {
       q: "Quand se déroule la formation ?",
-      a: "Du 6 novembre au 6 décembre 2026, à raison de 4 sessions par semaine. Les horaires et le lien d'accès sont communiqués aux participants dont l'inscription est confirmée.",
+      a: "En deux sessions : la Session 1 du 6 novembre au 6 décembre 2026, puis la Session 2 du 8 décembre 2026 au 8 janvier 2027, à raison de 4 sessions par semaine. Les horaires et le lien d'accès sont communiqués aux participants dont l'inscription est confirmée.",
+    },
+    {
+      q: "Combien de places y a-t-il ?",
+      a: "10 places par session. Une place est attribuée uniquement à une inscription confirmée, c'est-à-dire après vérification du paiement : le nombre de places restantes affiché sur le site est calculé à partir de ces inscriptions. Les inscriptions à la Session 1 ferment dès que les 10 places sont prises, ou au plus tard le 9 novembre 2026 à 23 h 59 (heure de Paris). Il n'y aura pas de troisième session.",
+    },
+    {
+      q: "Comment s'inscrire à la Session 2 ?",
+      a: "Les inscriptions à la Session 2 ouvrent dès que la Session 1 est complète ou close. Tu réserves ta place en réglant 50 €, déduits du prix de 297 € : il reste ensuite 247 € à régler. La réservation n'est pas remboursable si tu décides de ne pas commencer la formation ; si tu la suis jusqu'au bout, elle est remboursable avec le reste du prix dans le cadre de la garantie 60 jours. Ton droit de rétractation reste applicable dans les conditions prévues par les conditions de vente.",
+    },
+    {
+      q: "Puis-je m'inscrire après le démarrage d'une session ?",
+      a: "Oui, jusqu'à 3 jours après le démarrage, s'il reste des places. Les sessions qui ont eu lieu avant la confirmation de ton inscription ne comptent pas comme des absences, tu reçois leurs replays, et ta progression est mesurée à partir de la date de confirmation de ton inscription.",
     },
     {
       q: "Comment se passe l'inscription et le paiement ?",
-      a: "Tu envoies une demande d'inscription sur ce site. Tu reçois ensuite les instructions de paiement sur WhatsApp. Ton inscription est confirmée uniquement après vérification effective de ton paiement. Aucun paiement n'est demandé directement sur ce site pour le moment.",
+      a: "Tu envoies une demande d'inscription sur ce site. Tu reçois ensuite les instructions de paiement sur WhatsApp (pour la Session 2, d'abord la réservation de 50 €). Ton inscription est confirmée uniquement après vérification effective de ton paiement. Aucun paiement n'est demandé directement sur ce site pour le moment.",
     },
     {
       q: "Est-ce que je vais forcément faire plus de ventes ?",
@@ -260,7 +302,7 @@ export const offer = {
   legal: {
     /** Versions des textes de consentement (conservées avec chaque enregistrement). */
     leadConsentVersion: "lead-2026-10-v1",
-    termsVersion: "cgv-2026-10-v3",
+    termsVersion: "cgv-2026-10-v4",
     /**
      * Demande expresse d'exécution avant la fin du délai de rétractation
      * (consommateurs UE). À FAIRE VALIDER par un professionnel du droit.
@@ -283,12 +325,39 @@ export function paymentMethodLabel(id: string): string {
   return offer.paymentMethods.find((m) => m.id === id)?.label ?? id;
 }
 
+export type Cohort = (typeof offer.cohorts)[number];
+export type CohortId = Cohort["id"];
+
+export const COHORT_IDS = offer.cohorts.map((c) => c.id) as [CohortId, ...CohortId[]];
+
+export function findCohort(id: string | null | undefined): Cohort | undefined {
+  return offer.cohorts.find((c) => c.id === id);
+}
+
+/** Nom lisible d'une session, ex. « Session 2 (8 déc. 2026 → 8 janv. 2027) ». */
+export function cohortLabel(id: string): string {
+  const cohort = findCohort(id);
+  return cohort ? `${cohort.name} (${cohort.shortDates})` : id;
+}
+
+/** Montant en euros lisible, ex. 24700 → « 247 € ». */
+export function formatEuroCents(cents: number): string {
+  return `${(cents / 100).toLocaleString("fr-FR")} €`;
+}
+
+/** Solde restant après la réservation (Session 2), en centimes ; null sans réservation. */
+export function balanceCents(cohort: Cohort): number | null {
+  return cohort.deposit ? offer.price.amountCents - cohort.deposit.amountCents : null;
+}
+
 /** Textes de consentement affichés à côté des cases à cocher. */
 export const consentTexts = {
   lead: "J'accepte que mes coordonnées soient utilisées pour recevoir le mini-atelier gratuit et être contacté(e), par WhatsApp ou e-mail, au sujet de la formation CHOGAN Q4 SALES SYSTEM. Je peux me désinscrire à tout moment.",
   terms: "J'ai lu et j'accepte les conditions de vente.",
-  earlyStart:
-    "Je demande que la formation commence le 6 novembre 2026, avant la fin de mon délai de rétractation de 14 jours. Je reconnais qu'en cas de rétractation le montant correspondant aux sessions déjà suivies restera dû, et que je perdrai ce droit une fois la formation entièrement exécutée.",
+  earlyStart: (startLabel: string) =>
+    `Je demande que la formation commence le ${startLabel}, avant la fin de mon délai de rétractation de 14 jours. Je reconnais qu'en cas de rétractation le montant correspondant aux sessions déjà suivies restera dû, et que je perdrai ce droit une fois la formation entièrement exécutée.`,
+  deposit: (depositLabel: string, balanceLabel: string) =>
+    `Je réserve ma place avec ${depositLabel}, déduits du prix de 297 € (solde : ${balanceLabel}). J'ai compris que cette réservation n'est pas remboursable si je décide de ne pas commencer la formation, et qu'elle est remboursable avec le reste du prix si je suis la formation jusqu'au bout, dans les conditions de la garantie 60 jours.`,
   marketing:
     "J'accepte de recevoir d'autres conseils et offres par WhatsApp ou e-mail (facultatif).",
 } as const;

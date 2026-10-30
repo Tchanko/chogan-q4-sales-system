@@ -5,6 +5,8 @@ export type ServiceErrorCode =
   | "BOT_SUSPECTED"
   | "STORAGE_UNAVAILABLE"
   | "ENROLLMENT_CLOSED"
+  | "COHORT_CHANGED"
+  | "SESSION_FULL"
   | "CONFIG_INCOMPLETE"
   | "NOT_FOUND"
   | "INVALID_TRANSITION"
@@ -29,6 +31,10 @@ export const USER_MESSAGES: Record<ServiceErrorCode, string> = {
   STORAGE_UNAVAILABLE:
     "L'enregistrement en ligne est momentanément indisponible. Ta demande n'a pas été enregistrée : écris-nous directement sur WhatsApp.",
   ENROLLMENT_CLOSED: "Les inscriptions pour cette session sont closes.",
+  COHORT_CHANGED:
+    "Les inscriptions à cette session viennent de fermer. Ta demande n'a pas été enregistrée : recharge la page pour voir la session ouverte et ses conditions.",
+  SESSION_FULL:
+    "Cette session a déjà toutes ses places confirmées : cette demande ne peut pas être confirmée. Propose à la personne de s'inscrire à la session suivante.",
   CONFIG_INCOMPLETE:
     "Les inscriptions en ligne ne sont pas encore ouvertes. Ta demande n'a pas été enregistrée : écris-nous sur WhatsApp.",
   NOT_FOUND: "Élément introuvable.",

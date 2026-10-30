@@ -17,30 +17,44 @@ interface Values {
   phone: string;
   country: string;
   paymentMethod: string;
+  cohort: string;
   consentTerms: boolean;
   consentEarlyStart: boolean;
+  consentDeposit: boolean;
   consentMarketing: boolean;
 }
 
-const initialValues: Values = {
-  fullName: "",
-  email: "",
-  phoneCountry: "FR",
-  phone: "",
-  country: "",
-  paymentMethod: "",
-  consentTerms: false,
-  consentEarlyStart: false,
-  consentMarketing: false,
-};
+/** Session ouverte au moment de l'affichage (revérifiée par le serveur). */
+export interface FormCohort {
+  id: string;
+  name: string;
+  startLabel: string;
+  /** Session 2 : montant de la réservation et solde ; null sinon. */
+  depositLabel: string | null;
+  balanceLabel: string | null;
+}
 
 export function RegistrationForm({
   countries,
+  cohort,
 }: {
   countries: { priority: CountryOption[]; others: CountryOption[] };
+  cohort: FormCohort;
 }) {
   const router = useRouter();
-  const [values, setValues] = useState<Values>(initialValues);
+  const [values, setValues] = useState<Values>({
+    fullName: "",
+    email: "",
+    phoneCountry: "FR",
+    phone: "",
+    country: "",
+    paymentMethod: "",
+    cohort: cohort.id,
+    consentTerms: false,
+    consentEarlyStart: false,
+    consentDeposit: false,
+    consentMarketing: false,
+  });
   const [errors, setErrors] = useState<FieldErrors>({});
   const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -80,7 +94,12 @@ export function RegistrationForm({
     if (res.ok && res.data?.registrationId) {
       trackEvent(
         "registration_requested",
-        { value: offer.price.amountCents / 100, currency: offer.price.currency, payment_method: values.paymentMethod },
+        {
+          value: offer.price.amountCents / 100,
+          currency: offer.price.currency,
+          payment_method: values.paymentMethod,
+          cohort: cohort.id,
+        },
         { dedupeKey: res.data.registrationId, scope: "persistent" },
       );
       router.push("/confirmation");
@@ -156,8 +175,9 @@ export function RegistrationForm({
       >
         <legend className="field-label">Moyen de paiement souhaité</legend>
         <p className="-mt-0.5 mb-3 text-sm text-muted">
-          Aucun paiement n&apos;est demandé maintenant : les instructions te sont envoyées sur WhatsApp
-          après validation de ta demande.
+          Aucun paiement n&apos;est demandé maintenant : les instructions
+          {cohort.depositLabel ? ` (réservation de ${cohort.depositLabel})` : ""} te sont envoyées sur
+          WhatsApp après validation de ta demande.
         </p>
         <div className="space-y-2">
           {offer.paymentMethods.map((m) => (
@@ -213,7 +233,18 @@ export function RegistrationForm({
             error={errors.consentEarlyStart}
             required
           >
-            {consentTexts.earlyStart}
+            {consentTexts.earlyStart(cohort.startLabel)}
+          </CheckboxField>
+        )}
+        {cohort.depositLabel && cohort.balanceLabel && (
+          <CheckboxField
+            id="reg-deposit"
+            checked={values.consentDeposit}
+            onCheckedChange={(v) => update({ consentDeposit: v })}
+            error={errors.consentDeposit}
+            required
+          >
+            {consentTexts.deposit(cohort.depositLabel, cohort.balanceLabel)}
           </CheckboxField>
         )}
         <CheckboxField
@@ -228,11 +259,13 @@ export function RegistrationForm({
       <FormAlert message={serverMessage} />
 
       <button type="submit" className="btn btn-primary w-full text-lg" disabled={submitting}>
-        {submitting ? "Envoi en cours…" : "Envoyer ma demande d'inscription"}
+        {submitting ? "Envoi en cours…" : `Envoyer ma demande d'inscription à la ${cohort.name}`}
       </button>
       <p className="text-center text-sm text-muted">
-        Envoyer ta demande ne t&apos;engage à aucun paiement immédiat. Ton inscription sera confirmée
-        après vérification de ton paiement.
+        Envoyer ta demande ne t&apos;engage à aucun paiement immédiat et ne réserve pas encore de place.
+        {cohort.depositLabel
+          ? " Ta place sera réservée après vérification du paiement de ta réservation."
+          : " Ton inscription sera confirmée après vérification de ton paiement."}
       </p>
     </form>
   );

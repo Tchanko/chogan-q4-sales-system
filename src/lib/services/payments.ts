@@ -1,5 +1,5 @@
 import type { VerifiedPaymentEvent } from "@/lib/payments/types";
-import type { Repository } from "@/lib/storage/types";
+import { CohortFullError, type Repository } from "@/lib/storage/types";
 import { failure, success, type ServiceResult } from "./result";
 
 export interface PaymentApplied {
@@ -26,8 +26,10 @@ export async function applyProviderPayment(
     return success({ registrationId: registration.id, newlyConfirmed: false });
   }
 
+  // Premier paiement attendu : la réservation (Session 2) ou le prix complet.
+  const expectedCents = registration.depositCents ?? registration.priceCents;
   if (
-    event.amountCents !== registration.priceCents ||
+    event.amountCents !== expectedCents ||
     event.currency.toUpperCase() !== registration.currency.toUpperCase()
   ) {
     console.error("[paiements] montant ou devise inattendus", {
@@ -41,12 +43,19 @@ export async function applyProviderPayment(
   }
   if (registration.status === "cancelled") return failure("INVALID_TRANSITION");
 
-  await repo.updateRegistration(registration.id, {
-    status: "confirmed",
-    paymentVerifiedAt: now.toISOString(),
-    paymentVerificationSource: "provider",
-    paymentProvider: event.provider,
-    paymentReference: event.providerTransactionId.slice(0, 200),
-  });
+  try {
+    await repo.updateRegistration(registration.id, {
+      status: "confirmed",
+      paymentVerifiedAt: now.toISOString(),
+      paymentVerificationSource: "provider",
+      paymentProvider: event.provider,
+      paymentReference: event.providerTransactionId.slice(0, 200),
+    });
+  } catch (error) {
+    if (!(error instanceof CohortFullError)) throw error;
+    // Session complète : la place ne peut pas être attribuée, remboursement à traiter (CGV 3.3).
+    console.error("[paiements] session complète, paiement à rembourser", { reference: registration.reference });
+    return failure("SESSION_FULL");
+  }
   return success({ registrationId: registration.id, newlyConfirmed: true });
 }

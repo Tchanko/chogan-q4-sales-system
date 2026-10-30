@@ -1,16 +1,15 @@
 /**
- * Exécute la migration Supabase dans un PostgreSQL embarqué (PGlite) et
+ * Exécute les migrations Supabase dans un PostgreSQL embarqué (PGlite) et
  * vérifie les garde-fous : accès public refusé, dédoublonnage, impossibilité
- * de confirmer sans vérification, limitation de débit.
+ * de confirmer sans vérification, 10 places par session, limitation de débit.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
 
-const migration = readFileSync(
-  path.resolve(__dirname, "../../supabase/migrations/20261023000000_init.sql"),
-  "utf8",
+const migrations = ["20261023000000_init.sql", "20261030000000_sessions.sql"].map((file) =>
+  readFileSync(path.resolve(__dirname, "../../supabase/migrations", file), "utf8"),
 );
 
 let db: PGlite;
@@ -29,7 +28,7 @@ beforeAll(async () => {
     create role authenticated nologin;
     create role service_role nologin bypassrls;
   `);
-  await db.exec(migration);
+  for (const migration of migrations) await db.exec(migration);
   await db.exec(`grant usage on schema public to anon, authenticated, service_role;`);
 });
 
@@ -70,6 +69,55 @@ describe("migration Supabase", () => {
          terms_version, consent_early_start, status)
         values ('CQ4-ABC234', '2026-11', 'Awa Test', '+2250707123456', 'CI', 'virement', 29700, 'EUR', 't', true, 'confirmed')`),
     ).rejects.toThrow(/registrations_confirmed_requires_verification/);
+  });
+
+  const insertRegistration = (i: number, cohort: string, extra = "") =>
+    db.query(`insert into public.registrations
+      (reference, cohort, full_name, whatsapp, country, payment_method, price_cents, currency,
+       terms_version, consent_early_start ${extra ? ", deposit_cents, consent_deposit" : ""})
+      values ('CQ4-T${String(i).padStart(5, "0")}', '${cohort}', 'Participant Test', '+33600000${String(i).padStart(3, "0")}',
+              'FR', 'virement', 29700, 'EUR', 't', true ${extra})
+      returning id`);
+
+  const confirm = (id: string) =>
+    db.query(
+      `update public.registrations
+          set status = 'confirmed', payment_verified_at = now(), payment_verification_source = 'manual'
+        where id = $1`,
+      [id],
+    );
+
+  it("refuse une 11e inscription confirmée dans une même session", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      const r = await insertRegistration(i, "2026-11");
+      ids.push((r.rows[0] as { id: string }).id);
+    }
+    for (const id of ids.slice(0, 10)) await confirm(id);
+    await expect(confirm(ids[10])).rejects.toThrow(/cohort_full/);
+    // Les autres sessions ne sont pas concernées.
+    const other = await insertRegistration(50, "2026-12", ", 5000, true");
+    await confirm((other.rows[0] as { id: string }).id);
+    // Une annulation libère une place.
+    await db.query("update public.registrations set status = 'cancelled' where id = $1", [ids[0]]);
+    await confirm(ids[10]);
+    const r = await db.query<{ n: number }>(
+      "select count(*)::int as n from public.registrations where cohort = '2026-11' and status = 'confirmed'",
+    );
+    expect(r.rows[0].n).toBe(10);
+  });
+
+  it("encadre la réservation de place et la vérification du solde", async () => {
+    await expect(insertRegistration(60, "2026-12", ", 5000, false")).rejects.toThrow(
+      /registrations_deposit_requires_consent/,
+    );
+    await expect(insertRegistration(61, "2026-12", ", 29700, true")).rejects.toThrow(/registrations_deposit_amount/);
+    const noDeposit = await insertRegistration(62, "2026-12");
+    await expect(
+      db.query("update public.registrations set balance_verified_at = now() where id = $1", [
+        (noDeposit.rows[0] as { id: string }).id,
+      ]),
+    ).rejects.toThrow(/registrations_balance_requires_deposit/);
   });
 
   it("applique les désinscriptions aux prospects", async () => {

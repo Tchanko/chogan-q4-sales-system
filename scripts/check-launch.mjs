@@ -78,12 +78,17 @@ if (get("NEXT_PUBLIC_REGISTRATION_MODE") === "whatsapp") warn("Bouton principal 
 
 // --- Inscriptions --------------------------------------------------------------
 const offerSource = readFileSync(path.join(root, "src/content/offer.ts"), "utf8");
-const defaultDeadline = offerSource.match(/enrollmentDeadlineIso:\s*"([^"]+)"/)?.[1];
-const deadlineIso = get("ENROLLMENT_DEADLINE") || defaultDeadline;
-const deadline = new Date(deadlineIso ?? "");
-if (Number.isNaN(deadline.getTime())) fail(`Date limite d'inscription invalide : ${deadlineIso}`);
-else if (deadline.getTime() < Date.now()) warn(`Date limite d'inscription dépassée (${deadlineIso}) : les inscriptions sont fermées.`);
-else ok(`Inscriptions ouvertes jusqu'au ${deadline.toLocaleString("fr-FR", { timeZone: "Europe/Paris" })} (heure de Paris).`);
+// Une date limite par session (dans l'ordre de src/content/offer.ts) ; ENROLLMENT_DEADLINE remplace la première.
+const sessionDeadlines = [...offerSource.matchAll(/enrollmentDeadlineIso:\s*"([^"]+)"/g)].map((m) => m[1]);
+if (sessionDeadlines.length === 0) fail("Aucune date limite d'inscription trouvée dans src/content/offer.ts.");
+sessionDeadlines.forEach((defaultIso, index) => {
+  const label = `Session ${index + 1}`;
+  const deadlineIso = (index === 0 && get("ENROLLMENT_DEADLINE")) || defaultIso;
+  const deadline = new Date(deadlineIso);
+  if (Number.isNaN(deadline.getTime())) fail(`${label} : date limite d'inscription invalide (${deadlineIso}).`);
+  else if (deadline.getTime() < Date.now()) warn(`${label} : date limite dépassée (${deadlineIso}), inscriptions fermées.`);
+  else ok(`${label} : inscriptions possibles jusqu'au ${deadline.toLocaleString("fr-FR", { timeZone: "Europe/Paris" })} (heure de Paris), dans la limite de 10 inscriptions confirmées.`);
+});
 if (["false", "0", "non"].includes(get("ENROLLMENT_OPEN").toLowerCase())) warn("ENROLLMENT_OPEN=false : inscriptions fermées manuellement.");
 
 // --- Mesure ------------------------------------------------------------------------

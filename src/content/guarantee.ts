@@ -140,7 +140,7 @@ export const guaranteeContract = {
   pendingDecisions: {
     // Décidé le 25/10/2026, précisé le 29/10/2026.
     attendance:
-      "La présence est requise à toutes les sessions en direct. Une absence n'empêche pas le participant de continuer à suivre la formation. Seules les absences non justifiées sont décomptées : une première absence non justifiée est sans conséquence ; la deuxième entraîne automatiquement la perte du droit au remboursement prévu par la garantie. Un replay de chaque session est fourni ; son visionnage ne vaut pas présence.",
+      "La présence est requise à toutes les sessions en direct. Une absence n'empêche pas le participant de continuer à suivre la formation. Seules les absences non justifiées sont décomptées : une première absence non justifiée est sans conséquence ; la deuxième entraîne automatiquement la perte du droit au remboursement prévu par la garantie. Un replay de chaque session est fourni ; son visionnage ne vaut pas présence. Pour une inscription confirmée après le démarrage de la formation, les sessions tenues avant la date de confirmation de l'inscription ne sont pas décomptées comme des absences (décision du 30/10/2026).",
     // Décidé le 26/10/2026.
     absenceJustification: "Sont considérées comme justifiées les absences pour maladie ou urgence.",
     // Décidé le 25/10/2026.
@@ -190,7 +190,7 @@ export const guaranteeContract = {
       "La grille d'évaluation est présentée pendant la formation. L'évaluation est réalisée par le formateur, Tchanko Chirac, à la fin de la formation puis, le cas échéant, à la fin de l'accompagnement individuel ; son résultat est communiqué par écrit au participant dans les 3 jours suivant l'évaluation.",
     progressScope: "Au moins deux plateformes, choisies par le participant au début de la formation.",
     progressPeriods:
-      "Relevé de départ au début de la formation ; relevés de fin à la fin de la formation puis, le cas échéant, à la fin de l'accompagnement individuel. Les vues et les mentions « J'aime » sont comparées sur deux périodes de 28 jours, l'une précédant le relevé de départ, l'autre précédant le relevé de fin ; les abonnés sont comparés en nombre total à chaque date de relevé.",
+      "Relevé de départ au début de la formation ou, pour une inscription confirmée après le démarrage, à la date de confirmation de l'inscription ; relevés de fin à la fin de la formation puis, le cas échéant, à la fin de l'accompagnement individuel. Les vues et les mentions « J'aime » sont comparées sur deux périodes de 28 jours, l'une précédant le relevé de départ, l'autre précédant le relevé de fin ; les abonnés sont comparés en nombre total à chaque date de relevé.",
     progressThreshold: "Une hausse d'au moins 10 % d'au moins un indicateur, sur au moins une des plateformes retenues.",
     // Décidé le 29/10/2026.
     zeroBaselineMinimum:

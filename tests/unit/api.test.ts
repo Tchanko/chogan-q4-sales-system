@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimits } from "@/lib/security/rate-limit";
 import { resetRepositoryCache } from "@/lib/storage";
-import { validLead, validRegistration } from "./helpers";
+import { validLead, validRegistration, validSession2Registration } from "./helpers";
 
 const ORIGIN = "http://localhost:3000";
 
@@ -113,11 +113,34 @@ describe("POST /api/registrations", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("refuse quand la date limite est dépassée", async () => {
-    vi.stubEnv("ENROLLMENT_DEADLINE", "2020-01-01T00:00:00Z");
-    const { POST } = await import("@/app/api/registrations/route");
-    const res = await POST(post("/api/registrations", validRegistration));
-    expect(res.status).toBe(409);
+  it("Session 1 close : refuse la demande pour la Session 1, accepte la Session 2", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-02T12:00:00Z") });
+    try {
+      vi.stubEnv("ENROLLMENT_DEADLINE", "2026-11-01T00:00:00Z");
+      const { POST } = await import("@/app/api/registrations/route");
+      const closed = await POST(post("/api/registrations", validRegistration));
+      expect(closed.status).toBe(409);
+      expect((await closed.json()).code).toBe("COHORT_CHANGED");
+      expect(closed.headers.get("set-cookie")).toBeNull();
+      const res = await POST(post("/api/registrations", validSession2Registration));
+      expect(res.status).toBe(201);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuse quand toutes les sessions sont closes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-12-20T12:00:00Z") });
+    try {
+      // Dates limites par défaut de src/content/offer.ts.
+      vi.stubEnv("ENROLLMENT_DEADLINE", "");
+      const { POST } = await import("@/app/api/registrations/route");
+      const res = await POST(post("/api/registrations", validSession2Registration));
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe("ENROLLMENT_CLOSED");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuse sans APP_SECRET (configuration incomplète) sans rien enregistrer", async () => {

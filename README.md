@@ -116,7 +116,10 @@ momentanément indisponible… écris-nous sur WhatsApp » : aucune fausse confi
 
 1. Créer un projet sur <https://supabase.com> (choisir une **région de l'Union européenne**).
 2. *SQL Editor* → *New query* → coller le contenu de
-   [`supabase/migrations/20261023000000_init.sql`](supabase/migrations/20261023000000_init.sql) → *Run*.
+   [`supabase/migrations/20261023000000_init.sql`](supabase/migrations/20261023000000_init.sql) → *Run*,
+   puis, dans une nouvelle requête,
+   [`supabase/migrations/20261030000000_sessions.sql`](supabase/migrations/20261030000000_sessions.sql) → *Run*
+   (dans cet ordre).
 3. *Project Settings* → *API Keys* : copier l'URL du projet et la clé **secrète**.
 4. Renseigner `SUPABASE_URL` et `SUPABASE_SECRET_KEY`, retirer `STORAGE_DRIVER=local`.
 5. Redémarrer, envoyer un formulaire de test, vérifier la ligne dans *Table Editor* → `leads`.
@@ -129,6 +132,11 @@ Ce que crée la migration :
 - fonctions `upsert_lead` (dédoublonnage par WhatsApp), `record_opt_out`, `hit_rate_limit`,
   réservées au rôle serveur ;
 - contrainte qui **interdit une inscription « confirmée » sans vérification de paiement tracée** ;
+- (migration du 30/10) colonnes de la réservation de la Session 2 (`deposit_cents`, `consent_deposit`)
+  et du solde (`balance_verified_at`, `balance_reference`), et déclencheur `enforce_cohort_capacity`
+  qui **refuse une 11e inscription confirmée dans une même session**, même si deux confirmations
+  arrivent en même temps (capacité 10 écrite dans le SQL : à modifier aussi si elle change dans
+  `src/content/offer.ts`) ;
 - vue `funnel_by_source` (prospects / demandes / paiements par source) lisible dans Supabase Studio.
 
 > La migration est testée automatiquement dans un PostgreSQL embarqué (`tests/sql`).
@@ -154,15 +162,35 @@ Visiteur ──> /  (mini-atelier) ──> prospect enregistré ──> bouton W
 ```
 
 - Aucun paiement n'est simulé ; l'API ne peut jamais créer une inscription confirmée.
+- Session 2 : « confirmée » signifie que la **réservation de 50 €** est vérifiée (la place est
+  réservée, la page de suivi affiche « Place réservée ») ; le solde de 247 € se vérifie ensuite
+  avec le bouton « Confirmer le solde… » du tableau de bord.
 - La confirmation manuelle exige une référence de transaction et refuse tout ce qui ressemble à
   un numéro de carte ou à un IBAN (contrôles Luhn / IBAN) : **aucune donnée bancaire stockée**.
 
-### Fermer les inscriptions
+### Sessions, places et fermeture des inscriptions (décisions du 30/10/2026)
 
-- Automatique : après `ENROLLMENT_DEADLINE` (par défaut 05/11/2026 23 h 59, Paris, veille du démarrage).
-- Immédiat : `ENROLLMENT_OPEN=false` puis redéploiement.
-- Effet : bandeau « inscriptions closes », CTA redirigés vers la démonstration gratuite, API qui
-  refuse les demandes (contrôle en temps réel côté serveur).
+| | Session 1 | Session 2 |
+| --- | --- | --- |
+| Dates | 6 nov. → 6 déc. 2026 | 8 déc. 2026 → 8 janv. 2027 (**fin supposée**, même rythme et mêmes horaires : à confirmer) |
+| Places | 10 inscriptions confirmées | 10 inscriptions confirmées |
+| Ouverture | dès maintenant | dès que la Session 1 est fermée |
+| Fermeture | 10 confirmées, ou 09/11/2026 23 h 59 (Paris) | 10 confirmées, ou 11/12/2026 23 h 59 (Paris) |
+| Paiement | 297 € | réservation de 50 € déduite du prix, puis solde de 247 € (échéance « À COMPLÉTER ») |
+
+- Une seule session est ouverte à la fois ; il n'y a pas de Session 3 : après la Session 2, tout est
+  fermé automatiquement.
+- **Seules les inscriptions confirmées comptent** : une demande ne réserve pas de place. N'envoyez
+  les instructions de paiement que s'il reste des places ; au-delà de 10, le tableau de bord et la
+  base de données refusent la confirmation (message « session complète »).
+- **Compteur de places** (`/formation`, `/inscription`) : calculé à partir des inscriptions
+  confirmées, mis à jour dès qu'une confirmation ou une annulation est faite dans `/admin`
+  (sinon au plus tard en une minute). Si le stockage ne répond pas, aucun compteur n'est affiché.
+- Si un visiteur envoie une demande pour une session qui vient de fermer, elle est refusée avec un
+  message lui demandant de recharger la page pour voir la session ouverte et ses conditions.
+- `ENROLLMENT_DEADLINE` remplace la date limite de la **Session 1** uniquement.
+- Fermeture immédiate de tout : `ENROLLMENT_OPEN=false` puis redéploiement (bandeau « inscriptions
+  fermées », CTA vers la démonstration gratuite, API qui refuse les demandes).
 
 ---
 
@@ -306,9 +334,17 @@ Toutes reprises dans l'article 7 des CGV (décisions des 25, 26 et 29/10/2026) :
 | `claimDeadline` | 7.8 | 14 jours calendaires après la fin effective de l'accompagnement, par WhatsApp ou e-mail |
 | `refundProcedure` / `refundDelay` | 7.9 | intégralité de la somme payée (297 €), sans déduction, sous 7 jours, par PayPal ou transfert |
 
-Exemple de calendrier : formation du 6 novembre au 6 décembre 2026, période de pratique continue du
-7 au 20 décembre, accompagnement du 21 décembre 2026 au 19 janvier 2027, réclamation possible jusqu'au
-2 février 2027.
+Exemples de calendrier :
+
+- Session 1 : formation du 6 novembre au 6 décembre 2026, période de pratique continue du 7 au
+  20 décembre, accompagnement du 21 décembre 2026 au 19 janvier 2027, réclamation possible jusqu'au
+  2 février 2027 ;
+- Session 2 (fin supposée le 8 janvier 2027) : pratique continue du 9 au 22 janvier, accompagnement
+  du 23 janvier au 21 février 2027, réclamation possible jusqu'au 7 mars 2027.
+
+Inscription tardive (confirmée après le démarrage, au plus tard 3 jours après) : les sessions
+antérieures ne comptent pas comme des absences, les replays sont fournis et le relevé de départ de la
+progression est fait à la date de confirmation de l'inscription (CGV 3.4, 7.2 et 7.7.3).
 
 **Encore à décider** : plus aucune décision ouverte dans `pendingDecisions`. Reste à passer
 `termsFinalized` à `true` (votre décision), puis `legalReviewDone` après relecture juridique.
@@ -329,7 +365,14 @@ Points de vigilance à faire trancher par un professionnel du droit :
 - **médiation OHADA** : ne remplace pas un médiateur de la consommation exigé dans certains pays ;
 - **TVA** : « sans TVA » à vérifier avec un comptable pour les clients de l'Union européenne ;
 - **formulaire type de rétractation** : remis après le premier e-mail, alors que le droit européen
-  attend qu'il soit fourni avant la conclusion du contrat.
+  attend qu'il soit fourni avant la conclusion du contrat ;
+- **réservation non remboursable de la Session 2** : un consommateur qui se rétracte dans les 14 jours
+  doit être remboursé intégralement, réservation comprise (les CGV le réservent : « sans préjudice
+  du droit de rétractation ») ; le caractère non remboursable peut aussi être jugé abusif selon les
+  pays ; l'interprétation retenue pour « remboursable si le participant suit la formation jusqu'au
+  bout » (remboursée avec le reste du prix au titre de la garantie) est à confirmer ;
+- **compteur de places** : il doit rester exact (pas de rareté artificielle) ; ne jamais le modifier
+  à la main ni compter des demandes non payées.
 
 Une fois les décisions renseignées : `termsFinalized: true`, puis, après relecture juridique,
 `legalReviewDone: true` (ce drapeau n'est jamais affiché sur le site). Rien sur le site ne prétend que
@@ -362,6 +405,12 @@ npm run check:launch
       (hébergeur, région Supabase, durées de conservation, transferts hors UE, autorité de contrôle,
       annulation de la formation par l'organisateur) + relecture par un professionnel.
 - [ ] Validation juridique de la case « démarrage avant la fin du délai de rétractation ».
+- [ ] Supabase : exécuter aussi la migration `20261030000000_sessions.sql` (sessions et places).
+- [ ] Session 2 : fixer la date limite de paiement du solde de 247 € (CGV article 2, « À COMPLÉTER »)
+      et confirmer la date de fin (8 janvier 2027 retenu par hypothèse), les jours et les horaires.
+- [x] Deux sessions de 10 places, fermeture à 10 confirmées ou au démarrage + 3 jours, réservation de
+      50 € pour la Session 2, inscriptions tardives (CGV articles 1 à 4, décisions du 30/10/2026).
+- [x] Masterclass de lancement : 1er novembre 2026 à 20 h (heure de Paris).
 - [ ] Garantie 60 jours : toutes les décisions sont prises ; passer `termsFinalized` à `true` quand
       vous validez l'article 7, puis `legalReviewDone` après relecture juridique.
 - [ ] Renseigner `NEXT_PUBLIC_WHATSAPP_NUMBER=237653068265` chez l'hébergeur pour activer les boutons

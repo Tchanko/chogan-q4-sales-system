@@ -13,7 +13,7 @@ test.describe("Page de vente (/formation)", () => {
       "8 modules, du calendrier éditorial au plan d'action Q4",
       "Des ressources pour gagner du temps",
       "Un mois de pratique, au rythme de 4 sessions par semaine",
-      "Ton inscription à la session de novembre 2026",
+      "Ton inscription à la Session 1",
       "Tes questions, nos réponses",
     ]) {
       await expect(page.getByRole("heading", { name: title })).toBeAttached();
@@ -30,7 +30,7 @@ test.describe("Page de vente (/formation)", () => {
     );
     await expect(page.locator("#programme ol > li")).toHaveCount(8);
     await expect(page.getByText("297 €").first()).toBeVisible();
-    await expect(page.getByText(/Session du 6 novembre 2026 au 6 décembre 2026/).first()).toBeVisible();
+    await expect(page.getByText(/Session 1 : du 6 novembre 2026 au 6 décembre 2026/).first()).toBeVisible();
     await expectNoHorizontalScroll(page);
   });
 
@@ -42,12 +42,39 @@ test.describe("Page de vente (/formation)", () => {
     await expect(page).toHaveURL(/\/inscription$/);
   });
 
-  test("reste honnête : bonus en préparation, pas de fausse rareté", async ({ page }) => {
+  test("reste honnête : bonus en préparation, compteur réel, pas de fausse rareté", async ({ page }) => {
     await page.goto("/formation");
     await expect(page.getByText("En préparation", { exact: true })).toHaveCount(5);
     const text = await page.locator("main").innerText();
-    expect(text).not.toMatch(/places? restantes?|plus que \d+ places?|compte à rebours|dernière chance|garanti(?:e|s)? de vendre/i);
+    expect(text).not.toMatch(/plus que \d+ places?|compte à rebours|dernière chance|garanti(?:e|s)? de vendre/i);
     expect(text).toContain("Aucun paiement n'est demandé sur ce site.");
+    // Compteur calculé à partir des inscriptions confirmées (10 places par session).
+    const counters = page.getByTestId("seats-counter");
+    await expect(counters.first()).toContainText(/^(\d+) places? restantes? sur 10/);
+    await expect(counters.first()).toContainText("Calculé à partir des inscriptions confirmées");
+    const remaining = Number(await counters.first().getAttribute("data-remaining"));
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(10);
+    // Session 1 ouverte : pas de réservation ni de bandeau de fermeture.
+    await expect(page.getByTestId("deposit-info")).toHaveCount(0);
+    await expect(page.getByTestId("enrollment-banner")).toHaveCount(0);
+  });
+
+  test("FAQ : deux sessions, 10 places, réservation de la Session 2, inscription tardive", async ({ page }) => {
+    await page.goto("/formation");
+    const main = page.locator("main");
+    await expect(main).toContainText("Session 2 : du 8 décembre 2026 au 8 janvier 2027");
+    await expect(main).toContainText("10 participants maximum par session.");
+    for (const q of [
+      "Combien de places y a-t-il ?",
+      "Comment s'inscrire à la Session 2 ?",
+      "Puis-je m'inscrire après le démarrage d'une session ?",
+    ]) {
+      await expect(page.getByText(q, { exact: true })).toBeAttached();
+    }
+    await expect(main).toContainText("Tu réserves ta place en réglant 50 €, déduits du prix de 297 €");
+    await expect(main).toContainText("ou au plus tard le 9 novembre 2026 à 23 h 59 (heure de Paris)");
+    await expect(main).toContainText("Il n'y aura pas de troisième session.");
   });
 
   test("objectifs et bonus : textes retirés, valeur de chaque bonus affichée", async ({ page }) => {
@@ -88,7 +115,7 @@ test.describe("Page de vente (/formation)", () => {
     const programme = await top("8 modules, du calendrier éditorial au plan d'action Q4");
     const bonus = await top("Des ressources pour gagner du temps");
     const garantie = await top("Garantie 60 jours");
-    const prix = await top("Ton inscription à la session de novembre 2026");
+    const prix = await top("Ton inscription à la Session 1");
     expect(programme).toBeLessThan(bonus);
     expect(bonus).toBeLessThan(garantie);
     expect(garantie).toBeLessThan(prix);
@@ -161,7 +188,8 @@ test.describe("Page de vente (/formation)", () => {
     await page.goto("/conditions-de-vente");
     const main = page.locator("main");
     await expect(main).toContainText("vendue par Tchanko Chirac");
-    await expect(main).toContainText("La formation se déroule du 6 novembre 2026 au 6 décembre 2026");
+    await expect(main).toContainText("Session 1 : du 6 novembre 2026 au 6 décembre 2026");
+    await expect(main).toContainText("Session 2 : du 8 décembre 2026 au 8 janvier 2027");
     await expect(main).toContainText(
       "formation en ligne, en direct, via Google Meet ; sessions le lundi, le mercredi, le vendredi et le dimanche, d'une durée de 2 heures chacune.",
     );
@@ -177,6 +205,27 @@ test.describe("Page de vente (/formation)", () => {
     await expect(main).toContainText("3 publications par jour sur chacune des plateformes utilisées par le participant.");
     await expect(main).toContainText("chaque participant fixe ses propres heures");
     await expect(main).not.toContainText(/1er novembre|Autre moyen/);
+  });
+
+  test("CGV : places, clôture, réservation de la Session 2 et inscription tardive (30/10)", async ({ page }) => {
+    await page.goto("/conditions-de-vente");
+    const main = page.locator("main");
+    await expect(main).toContainText("Version : cgv-2026-10-v4");
+    await expect(main).toContainText("deux sessions (promotions) de 10 participants maximum chacune");
+    await expect(main).toContainText("Aucune autre session n'est prévue.");
+    await expect(main).toContainText("Une demande d'inscription ne réserve pas de place.");
+    await expect(main).toContainText("le 9 novembre 2026 à 23:59 pour la Session 1, le 11 décembre 2026 à 23:59 pour la Session 2");
+    await expect(main).toContainText("Toute somme déjà versée pour cette demande lui est intégralement remboursée.");
+    await expect(main).toContainText("réservation de place de 50 €, déduite du prix : le solde restant à payer est de 247 €");
+    await expect(main).toContainText(
+      "Elle n'est pas remboursable si le participant décide de ne pas débuter la formation. Elle est remboursable si le participant suit la formation jusqu'au bout",
+    );
+    await expect(main).toContainText("sans préjudice du droit de rétractation (article 5)");
+    await expect(main).toContainText("ne sont pas décomptées comme des absences");
+    await expect(main).toContainText("le relevé de départ prévu à l'article 7.7.3 est effectué à la date de confirmation de l'inscription");
+    await expect(main).toContainText("pour une inscription confirmée après le démarrage, à la date de confirmation de l'inscription");
+    // Échéance du solde non décidée : signalée, jamais inventée.
+    await expect(main.locator("mark", { hasText: "date limite de paiement du solde de la Session 2" })).toHaveCount(1);
   });
 
   test("CGV : décisions du 26/10 (horaires, TVA, rétractation, report, garantie, droit applicable)", async ({
